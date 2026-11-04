@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Character gallery</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: linear-gradient(#9fd6ff, #e8f6ff); font-family: system-ui, sans-serif; }
+      canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+      .bar { position: fixed; left: 8px; top: 8px; display: flex; gap: 6px; flex-wrap: wrap; z-index: 2; }
+      .bar button { border: 0; border-radius: 10px; padding: 6px 10px; background: #fff; font-weight: 700; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div class="bar" id="bar"></div>
+    <script type="module" src="/src/gallery.js"></script>
+  </body>
+</html>
