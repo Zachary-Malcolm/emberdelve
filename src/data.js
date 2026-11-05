@@ -1,4 +1,4 @@
-import { mulberry32, hash2 } from './rng.js';
+import { mulberry32, hash2, pick } from './rng.js';
 import { BIOMES, ENEMIES } from './enemies.js';
 
 /*
@@ -8,7 +8,7 @@ import { BIOMES, ENEMIES } from './enemies.js';
  */
 
 export const rngFor = (seed, ...salts) => mulberry32(salts.reduce((h, s) => hash2(h, typeof s === 'number' ? s : [...String(s)].reduce((a, c) => a * 31 + c.charCodeAt(0), 7)), seed));
-export const pick = (rng, arr) => arr[Math.floor(rng() * arr.length)];
+export { pick };
 export function shuffle(rng, arr) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
@@ -55,6 +55,12 @@ export const RELICS = {
   tea: { name: 'Chamomile Tea', icon: 'tea', color: '#f6e7a8', text: 'All healing is 25% stronger.' },
   compass: { name: 'Old Compass', icon: 'compass', color: '#d9a441', text: 'Rewards offer one more choice.' },
   emberheart: { name: 'Ember Heart', icon: 'flame', color: '#ff6b3c', text: 'Enemies start every battle burning.' },
+  kettle: { name: 'Copper Kettle', icon: 'kettle', color: '#e08a4a', text: 'Heroes start every battle with a small shield (8% of their health).' },
+  bellows: { name: 'Pocket Bellows', icon: 'wind', color: '#ffb37a', text: 'Sparks fill 15% faster.' },
+  mask: { name: 'Sleepy Mask', icon: 'mask', color: '#b9a6e8', text: 'Enemies act 8% slower.' },
+  honey: { name: 'Honey Pot', icon: 'honey', color: '#ffc845', text: 'Resting at a campfire heals 15% more.' },
+  map: { name: 'Treasure Map', icon: 'map', color: '#e8d6a8', text: '+6 gold from every battle.' },
+  key: { name: 'Rusty Key', icon: 'key', color: '#c98a4a', text: 'Normal battles sometimes leave a small chest (12%).' },
 };
 
 // ---------------------------------------------------------------- the map
@@ -241,6 +247,70 @@ export const EVENTS = [
     choices: [
       { label: 'Step into the ring', hint: 'Upgrade a random ability, lose 12% health', need: (c) => c.canUpgrade(), do: (c) => (c.hurt(0.12), `The world spins. ${c.upgradeCard()} feels stronger.`) },
       { label: 'Pick a few for later', hint: 'Heal everyone 20%', do: (c) => (c.heal(0.2), 'Toasted glowcaps. Delicious.') },
+    ],
+  },
+  {
+    id: 'forge',
+    title: 'A cold forge',
+    text: 'An abandoned forge in a nook of the wall. Under the ash, a few coals still glow.',
+    choices: [
+      { label: 'Stoke it and sharpen up', hint: 'A random hero gets stronger', do: (c) => `${c.train()} hones their gear until it sings.` },
+      { label: 'Warm your hands', hint: 'Heal everyone 20%', do: (c) => (c.heal(0.2), 'Fingers thaw, shoulders drop. Lovely.') },
+    ],
+  },
+  {
+    id: 'dice',
+    title: 'A Grubkin with dice',
+    text: 'A Grubkin sits on an upturned bucket, rattling two bone dice. "Double or nothing?"',
+    choices: [
+      { label: 'Bet 25 gold', hint: 'Half the time: win 50', need: (c) => c.goldNow >= 25, do: (c) => (c.rng() < 0.5 ? (c.gold(25), 'Double sixes! The Grubkin groans and pays up. +25 gold.') : (c.gold(-25), 'Snake eyes. The Grubkin cackles and pockets your coins.')) },
+      { label: 'Teach it a card game', hint: '+8 embers', do: (c) => (c.embers(8), 'It loses every hand and loves every minute. It pays you in warm embers.') },
+    ],
+  },
+  {
+    id: 'library',
+    title: 'A drowned library',
+    text: 'Shelves of swollen old books, half under still water. A few on the top shelf are dry.',
+    choices: [
+      { label: 'Read for a while', hint: 'Upgrade a random ability', need: (c) => c.canUpgrade(), do: (c) => `A margin note explains everything. ${c.upgradeCard()} gets better.` },
+      { label: 'Take the folded map', hint: 'Relic: Treasure Map', need: (c) => !c.hasRelic('map'), do: (c) => (c.giveRelic('map'), 'An X marks a spot, and then another. And another.') },
+      { label: 'Leave them to dry', do: () => 'You tiptoe out. Somewhere a page turns by itself.' },
+    ],
+  },
+  {
+    id: 'well',
+    title: 'A wishing well',
+    text: 'A little stone well with a bucket on a rope. Coins glint far down in the dark.',
+    choices: [
+      { label: 'Toss in 20 gold', hint: '+10 embers', need: (c) => c.goldNow >= 20, do: (c) => (c.gold(-20), c.embers(10), 'The coin plinks. A warm breeze rises out of the well, full of sparks.') },
+      { label: 'Make a wish anyway', hint: 'Maybe heal 25%', do: (c) => (c.rng() < 0.5 ? (c.heal(0.25), 'The well hums kindly. Everyone feels lighter.') : 'Nothing happens. Wishes are like that sometimes.') },
+    ],
+  },
+  {
+    id: 'tea',
+    title: 'Tea for nobody',
+    text: 'A tiny table, two tiny chairs, a kettle still steaming. Nobody home.',
+    choices: [
+      { label: 'Have a cup', hint: 'Heal everyone 25%', do: (c) => (c.heal(0.25), 'Exactly the right temperature. Suspicious, but delicious.') },
+      { label: 'Borrow the kettle', hint: 'Relic: Copper Kettle', need: (c) => !c.hasRelic('kettle'), do: (c) => (c.giveRelic('kettle'), 'You leave a thank-you note and two coins under the saucer.') },
+    ],
+  },
+  {
+    id: 'hive',
+    title: 'A humming hive',
+    text: 'A hive the size of a barrel hangs from a root, dripping golden honey.',
+    choices: [
+      { label: 'Reach in for honey', hint: 'Relic: Honey Pot, a few stings (8%)', need: (c) => !c.hasRelic('honey'), do: (c) => (c.hurt(0.08), c.giveRelic('honey'), 'Ow. Ow. Worth it.') },
+      { label: 'Hum along with the bees', hint: 'Heal everyone 10%', do: (c) => (c.heal(0.1), 'The bees approve. One sits on somebody\'s nose for a while.') },
+    ],
+  },
+  {
+    id: 'pillow',
+    title: 'A very soft moss bed',
+    text: 'A hollow full of thick, springy moss. It looks extremely nappable.',
+    choices: [
+      { label: 'Nap', hint: 'Heal everyone 30%, lose 10 gold to pickpocket moths', do: (c) => (c.heal(0.3), c.gold(-10), 'Best nap in years. Your purse feels a bit lighter.') },
+      { label: 'Stuff a pillow with it', hint: '+10% max health for all', do: (c) => (c.toughen(0.1), 'Everyone sleeps better from now on.') },
     ],
   },
 ];

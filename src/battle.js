@@ -18,8 +18,23 @@ const ENEMY_FACE = -Math.PI / 2 + 0.45;
 export const MAX_SPARKS = 10;
 const _v = new THREE.Vector3();
 
-/** Horizontal squeeze of both lines (main.js sets it below 1 on tall phone screens). */
-export const layout = { x: 1 };
+/**
+ * Screen layout, set by main.js before a party is placed. x squeezes both lines towards the middle.
+ * portrait: tall phones look along +x from behind the heroes (heroes at the bottom of the screen,
+ * enemies at the top), so everyone turns inwards and a little towards the camera instead.
+ */
+export const layout = { x: 1, portrait: false };
+
+/** Which way a unit faces when standing at home. */
+export function faceFor(side, pos) {
+  if (!layout.portrait) return side === 'hero' ? HERO_FACE : ENEMY_FACE;
+  const s = pos.z > 0.05 ? -1 : 1; // turn towards the middle line
+  return side === 'hero' ? (s > 0 ? 0.35 : Math.PI - 0.35) : -Math.PI / 2 + s * 0.4;
+}
+/** Facing for the victory cheer: towards the camera. */
+export function cheerFace() {
+  return layout.portrait ? -Math.PI / 2 : HERO_FACE * 0.45;
+}
 
 /** Spread n units along z. */
 function spreadZ(n, gap) {
@@ -55,13 +70,14 @@ export class Battle {
    * enemyIds, level; cards: [{ id, level }]; mods: run modifiers (relics, buildings)
    * ui: { overlay (element), bossBar (element) }  onEnd(result)  onChange()
    */
-  constructor({ charBatch, fx, heroes, enemyIds, level, cards, mods, ui, onEnd, onChange, kind }) {
+  constructor({ charBatch, fx, heroes, enemyIds, level, cards, mods, ui, onEnd, onChange, onKill, kind }) {
     this.batch = charBatch;
     this.fx = fx;
     this.mods = mods;
     this.ui = ui;
     this.onEnd = onEnd;
     this.onChange = onChange || (() => {});
+    this.onKill = onKill || (() => {});
     this.kind = kind;
     this.cards = cards.map((c) => ({ ...c, cd: 0 }));
     this.sparks = Math.min(MAX_SPARKS, 2 + (mods.startSparks || 0));
@@ -95,7 +111,7 @@ export class Battle {
       });
       u.alive = h.hp > 0;
       u.char.ko = !u.alive;
-      u.char.yaw = HERO_FACE;
+      u.char.yaw = faceFor('hero', u.home);
     }
     for (const [id, pos] of enemyFormation(enemyIds)) this.spawnEnemy(id, pos, 0.25 + this.units.length * 0.12);
     for (const u of this.units) u.timer = 0.6 + Math.random() * u.spd * 0.8 + (u.side === 'enemy' ? 0.9 : 0);
@@ -104,7 +120,8 @@ export class Battle {
     // trinket effects that act at the start
     for (const u of this.heroes()) {
       if (u.gear.effect === 'spark') this.sparks = Math.min(MAX_SPARKS, this.sparks + 1);
-      if (u.gear.effect === 'shield') u.shieldIn = 0.9; // a moment after the fight starts (see update)
+      u.shieldK = (u.gear.effect === 'shield' ? 0.12 : 0) + (mods.startShield || 0);
+      if (u.shieldK) u.shieldIn = 0.9; // a moment after the fight starts (see update)
     }
   }
 
@@ -123,7 +140,7 @@ export class Battle {
     const st = enemyStats(id, this.level);
     const char = new Character(this.batch, enemySpec(id), { scale: def.scale });
     char.pos.copy(pos);
-    char.yaw = ENEMY_FACE;
+    char.yaw = faceFor('enemy', pos);
     char.spawn(delay);
     const u = this.addUnit({ side: 'enemy', id, name: def.name, def, char, hp: st.hp, maxHp: st.hp, atk: st.atk, spd: def.spd, melee: def.melee, home: pos.clone() });
     u.timer = 1 + delay + Math.random();
@@ -148,7 +165,7 @@ export class Battle {
   }
 
   faceHome(u) {
-    u.char.yaw = u.side === 'hero' ? HERO_FACE : ENEMY_FACE;
+    u.char.yaw = faceFor(u.side, u.home);
   }
 
   moveTo(u, to, then, speed = 7.5) {
@@ -273,6 +290,16 @@ export class Battle {
     }
     if (src?.def?.trait === 'lifesteal' && src.alive) this.heal(src, amt * 0.5, true);
     if (target.def?.trait === 'summon') this.checkSummon(target);
+    if (target.def?.trait === 'enrage' && !target.enraged && target.hp > 0 && target.hp < target.maxHp * 0.5) {
+      target.enraged = true;
+      target.spd *= 0.7;
+      target.atk *= 1.15;
+      sfx.summon();
+      this.fx.ring(target.char.pos, '#ff6b2c', 2.6, 20);
+      this.fx.burst(this.chest(target), '#ff9a3c', 18, { speed: 3.5, up: 3, life: 0.7, size: 0.2 });
+      this.fx.text(this.chest(target, 1.1), 'Enraged!', 'crit');
+      target.char.play('cheer', { dur: 0.6 });
+    }
     if (target.hp <= 0) this.kill(target, src);
     this.onChange();
     return amt;
@@ -323,6 +350,7 @@ export class Battle {
     u.bar.classList.add('gone');
     u.char.tint = null;
     if (u.side === 'enemy') {
+      this.onKill(u.id);
       u.char.action = null;
       u.char.shatter(u.def.boss ? 1.6 : 1);
       this.fx.burst(this.chest(u, 0.4), '#ffffff', u.def.boss ? 30 : 12, { speed: 4, up: 3, life: 0.6, size: 0.22, mat: 'plaster' });
@@ -352,7 +380,7 @@ export class Battle {
       boss.summoned++;
       sfx.summon();
       for (const z of [-2.2, 2.2]) {
-        const n = this.spawnEnemy(boss.def.summon, new THREE.Vector3(2.4, FLOOR_Y, z), 0.1);
+        const n = this.spawnEnemy(boss.def.summon, new THREE.Vector3(2.4 * layout.x, FLOOR_Y, z), 0.1);
         n.timer = 1.5;
       }
     }
@@ -519,8 +547,8 @@ export class Battle {
       u.char.play('cast', { dur: 0.9, hitAt: 0.5, onHit: () => (this.shield(u, u.maxHp * 0.1), sfx.block()), onEnd: () => (u.busy = false) });
       return;
     }
-    // big area slams: Rootheart every 3rd swing, Prism Sentinel every 3rd action
-    if ((u.id === 'rootheart' || u.id === 'sentinel') && n % 3 === 0) {
+    // big area slams (bosses with slamAll = ring colour) every 3rd action
+    if (def.slamAll && n % 3 === 0) {
       u.busy = true;
       u.char.play('slam', {
         dur: 1.1,
@@ -528,9 +556,12 @@ export class Battle {
         onHit: () => {
           sfx.slam();
           this.fx.shake = 0.5;
-          const c = new THREE.Vector3(-3.6, FLOOR_Y, 0);
-          this.fx.ring(c, u.id === 'sentinel' ? '#9fe3ff' : '#c9a46a', 4.5, 26);
-          for (const h of this.heroes()) this.damage(u, h, atk * 0.6, { quiet: true, color: '#c9a46a' });
+          const c = new THREE.Vector3(-3.6 * layout.x, FLOOR_Y, 0);
+          this.fx.ring(c, def.slamAll, 4.5, 26);
+          for (const h of this.heroes()) {
+            this.damage(u, h, atk * 0.6, { quiet: true, color: def.slamAll });
+            if (def.slamBurn && h.alive) h.burn = { dps: atk * 0.15, t: 3 };
+          }
         },
         onEnd: () => (u.busy = false),
       });
@@ -542,6 +573,7 @@ export class Battle {
       this.melee(u, t, anim, (tt) => {
         this.damage(u, tt, atk, { melee: true });
         if (def.trait === 'poison') tt.poison = { dps: atk * 0.3, t: 4 };
+        if (def.trait === 'burn' && tt.alive) tt.burn = { dps: atk * 0.25, t: 3 };
         if (def.trait === 'stunHit' && n % 3 === 0) {
           this.stun(tt, 1.2);
           this.fx.ring(tt.char.pos, '#e07fff', 1.6, 12);
@@ -552,10 +584,10 @@ export class Battle {
         }
       }, { dur: def.attack === 'slam' ? 1.0 : def.attack === 'hop' ? 0.65 : 0.6, hitAt: def.attack === 'slam' ? 0.58 : 0.5 });
     } else {
-      this.ranged(u, t, u.id === 'sentinel' ? 'cast' : def.attack, () => {
+      this.ranged(u, t, def.attack === 'slam' ? 'cast' : def.attack, () => {
         const from = this.chest(u, 0.8);
         sfx.cast();
-        this.fx.shoot(u.id === 'sentinel' ? 'shard' : 'spore', from, this.chest(t), {
+        this.fx.shoot(def.boltShape || (def.boss ? 'shard' : 'spore'), from, this.chest(t), {
           dur: from.distanceTo(this.chest(t)) / 12,
           arc: 1.2,
           color: def.bolt,
@@ -563,6 +595,7 @@ export class Battle {
           onHit: () => {
             this.damage(u, t, atk, { color: def.bolt });
             if (def.trait === 'poison') t.poison = { dps: atk * 0.3, t: 4 };
+            if (def.trait === 'burn' && t.alive) t.burn = { dps: atk * 0.25, t: 3 };
           },
         });
       }, { dur: 0.8, hitAt: 0.55 });
@@ -788,7 +821,7 @@ export class Battle {
       if (!u.alive) continue;
       if (u.shieldIn != null && !this.over && (u.shieldIn -= dt) <= 0) {
         u.shieldIn = null;
-        this.shield(u, u.maxHp * 0.12);
+        this.shield(u, u.maxHp * u.shieldK);
       }
       if (u.gear?.effect === 'regen' && !this.over) {
         u.regenT = (u.regenT || 0) + dt;
@@ -815,7 +848,7 @@ export class Battle {
         continue;
       }
       if (this.over || u.busy || u.stun > 0) continue;
-      const haste = u.side === 'hero' ? (1 + this.buffs.haste) * (this.mods.spdMul || 1) : 1;
+      const haste = u.side === 'hero' ? (1 + this.buffs.haste) * (this.mods.spdMul || 1) : this.mods.enemySpd || 1;
       u.timer -= dt * haste;
       if (u.timer <= 0) {
         u.timer = u.spd * (0.9 + Math.random() * 0.2);
@@ -860,7 +893,7 @@ export class Battle {
           u.move = null;
           u.char.moving = false;
           u.char.pos.y = FLOOR_Y;
-          u.char.yaw = HERO_FACE * 0.45;
+          u.char.yaw = cheerFace();
           u.char.play('cheer', { dur: 1.6 });
         }
       }, 450);

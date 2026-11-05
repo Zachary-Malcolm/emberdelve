@@ -9,17 +9,18 @@ import { unlockAudio, setMuted, setMusic, setAmbience, setMood } from './audio.j
 import { Base, BUILDINGS } from './base.js';
 import { Arena, ARENA_Y } from './arena.js';
 import { BattleFX } from './fx.js';
-import { Battle, heroFormation, FLOOR_Y, MAX_SPARKS, layout } from './battle.js';
+import { Battle, heroFormation, FLOOR_Y, MAX_SPARKS, layout, faceFor } from './battle.js';
 import { Character } from './chars.js';
 import { heroSpec, HEROES, RECRUITS } from './heroes.js';
 import { BIOMES, ENEMIES } from './enemies.js';
 import { ABILITIES, RELICS, EVENTS, STARTING_CARDS, MAX_CARDS, ROWS, NODE_INFO, makeMap, encounterFor, rngFor, pick, shuffle } from './data.js';
 import { load, store, wipe } from './save.js';
-import { randomSeed } from './rng.js';
+import { randomSeed, hash2 } from './rng.js';
 import { portrait } from './portraits.js';
 import { icon } from './icons.js';
 import { RARITY, chestLoot, itemIcon, effectText, statLines, STASH } from './items.js';
 import { chestSpec } from './chest.js';
+import { journalBody, journalNote } from './journal.js';
 
 // ---------------------------------------------------------------- setup
 
@@ -51,22 +52,32 @@ const CAMP = {
   },
 };
 function arenaStation() {
-  // frame the fighting floor whatever the screen shape; on tall phones both lines squeeze in a bit
+  // Wide screens look at the fight side-on (heroes left, enemies right). Tall phones look from
+  // behind the heroes instead (heroes at the bottom, enemies at the top), so the line of battle
+  // runs up the screen and the characters can be big.
   const a = view.camera.aspect;
   const fov = THREE.MathUtils.degToRad(view.camera.fov);
   const halfW = Math.atan(Math.tan(fov / 2) * a);
   const portraitMode = a < 0.9;
-  layout.x = portraitMode ? 0.72 : 1;
-  const dist = Math.max(19, (portraitMode ? 5.4 : 9) / Math.tan(halfW)) * (portraitMode ? Math.pow(a, 0.75) : 1); // rig.pose re-scales portrait
-  return {
-    target: new THREE.Vector3(0, ARENA_Y + (portraitMode ? 0.2 : 0.9), portraitMode ? 0.5 : 0.4),
-    dir: new THREE.Vector3(0, portraitMode ? 0.75 : 0.6, 1).normalize(),
-    dist,
-  };
+  layout.portrait = portraitMode;
+  layout.x = portraitMode ? 0.85 : 1;
+  if (portraitMode) {
+    const dist = (3.9 / Math.tan(halfW)) * Math.pow(a, 0.75); // rig.pose re-scales portrait distances
+    return { target: new THREE.Vector3(0.2, ARENA_Y + 0.6, 0), dir: new THREE.Vector3(-1, 0.95, 0.06).normalize(), dist };
+  }
+  const dist = Math.max(19, 9 / Math.tan(halfW));
+  return { target: new THREE.Vector3(0, ARENA_Y + 0.9, 0.4), dir: new THREE.Vector3(0, 0.6, 1).normalize(), dist };
 }
 
 window.addEventListener('resize', () => {
-  if (state !== 'camp' && save.run) rig.snap(arenaStation());
+  if (state === 'camp' || !save.run) return;
+  const was = layout.portrait;
+  rig.snap(arenaStation());
+  // turned the phone between rooms: rebuild the room and line the party up the new way
+  if (was !== layout.portrait && !battle && !busyTravel && save.run.at !== undefined) {
+    arena.build(save.run.seed, save.run.biome, save.run.at || 'start', save.run.at ? nodeById(save.run.at).type : 'start', { animate: false, portrait: layout.portrait });
+    if (!['rest'].includes(state)) placeParty();
+  }
 });
 
 // ---------------------------------------------------------------- small UI helpers
@@ -164,10 +175,68 @@ function itemOf(heroId) {
 function holderOf(uid) {
   return Object.keys(save.equip).find((k) => save.equip[k] === uid) || null;
 }
+/** The worn trinket as a little charm on the hero model. */
+function charmOf(id) {
+  const it = itemOf(id);
+  return it ? { color: RARITY[it.rarity].color, rank: RARITY[it.rarity].rank } : null;
+}
+function charms() {
+  return Object.fromEntries(save.roster.map((id) => [id, charmOf(id)]));
+}
+function campHeroes() {
+  base.setHeroes(save.party, save.gear, charms());
+}
+
+// Hero levels carry over between delves: +2.5% health and power per level, up to level 10.
+const MAX_LEVEL = 10;
+function levelInfo(id) {
+  let xp = save.xp[id] || 0;
+  let level = 1;
+  let need = 40;
+  while (level < MAX_LEVEL && xp >= need) {
+    xp -= need;
+    level++;
+    need = 40 + 30 * (level - 1);
+  }
+  return { level, into: xp, need: level >= MAX_LEVEL ? 0 : need };
+}
+const levelMul = (id) => 1 + 0.025 * (levelInfo(id).level - 1);
+
+/** Experience for everyone in the party; returns who levelled up. */
+function awardXp(n) {
+  const ups = [];
+  for (const h of save.run.heroes) {
+    const before = levelInfo(h.id).level;
+    save.xp[h.id] = (save.xp[h.id] || 0) + n;
+    const after = levelInfo(h.id).level;
+    if (after > before) ups.push({ id: h.id, level: after });
+  }
+  if (ups.length) refreshMaxHp();
+  return ups;
+}
+
+function celebrateLevels(ups) {
+  ups.forEach((u, i) =>
+    after(500 + i * 450).then(() => {
+      const c = party[u.id];
+      if (!c) return;
+      bfx.text(c.pos.clone().setY(c.pos.y + c.height + 0.3), `Level ${u.level}!`, 'heal');
+      bfx.rise(c.pos, '#ffd34d', 16, 0.8);
+      bfx.ring(c.pos, '#ffd34d', 1.4, 14);
+      c.play('cheer', { dur: 1.2 });
+      sfx.complete();
+    }),
+  );
+}
+
+function xpBar(id) {
+  const L = levelInfo(id);
+  return `<div class="xp-row"><b class="lv">Lv ${L.level}</b><div class="xp-bar"><i style="width:${L.need ? (L.into / L.need) * 100 : 100}%"></i></div><small>${L.need ? `${L.into}/${L.need} XP` : 'Max level'}</small></div>`;
+}
 
 function heroStats(h) {
   const d = HEROES[h.id];
-  const g = 1 + 0.15 * (save.gear[h.id] || 0);
+  const g = (1 + 0.15 * (save.gear[h.id] || 0)) * levelMul(h.id);
   const it = itemOf(h.id)?.stats || {};
   const relics = new Set(save.run?.relics || []);
   const maxHp = Math.round(d.hp * g * (1 + (it.hp || 0)) * (1 + (h.trainHp || 0)) * (1 + (h.tough || 0)) * (relics.has('bark') ? 1.15 : 1));
@@ -197,7 +266,9 @@ function runMods() {
     bossMul: r.has('crown') ? 1.25 : 1,
     thorns: r.has('mirror') ? 0.2 : 0,
     startSparks: (r.has('jar') ? 3 : 0) + (spire >= 1 ? 2 : 0),
-    regenMul: spire >= 2 ? 1.2 : 1,
+    regenMul: (spire >= 2 ? 1.2 : 1) * (r.has('bellows') ? 1.15 : 1),
+    startShield: r.has('kettle') ? 0.08 : 0,
+    enemySpd: r.has('mask') ? 0.92 : 1,
     freeFirst: r.has('moth'),
     enemyBurn: r.has('emberheart'),
   };
@@ -210,7 +281,7 @@ function setupCamp() {
     if (save.built[id]) base.setBuilding(id, save.built[id]);
     else base.setPlot(id);
   }
-  base.setHeroes(save.party, save.gear);
+  campHeroes();
   renderCampPanel();
   makeTags();
 }
@@ -249,7 +320,7 @@ function renderCampPanel() {
   for (const id of save.party) {
     const d = HEROES[id];
     const c = el('button', 'hero-chip');
-    c.innerHTML = `<img alt="" src="${portrait(id, save.gear[id] || 0, 96)}"><span><b>${d.name}</b><small>${d.cls}</small></span>`;
+    c.innerHTML = `<img alt="" src="${portrait(id, save.gear[id] || 0, 96)}"><span><b>${d.name}</b><small>Lv ${levelInfo(id).level} · ${d.cls}</small></span>`;
     c.style.setProperty('--hc', d.color);
     c.onclick = () => openHero(id);
     strip.append(c);
@@ -268,12 +339,13 @@ function openHero(id) {
   body.innerHTML = `
     <img class="hero-big" alt="" src="${portrait(id, tier, 192)}">
     <div class="hero-info">
+      ${xpBar(id)}
       <p>${d.blurb}</p>
       <div class="stat-row"><span>Health</span><b>${st.maxHp}</b></div>
       <div class="stat-row"><span>Power</span><b>${Math.round(st.atk)}</b></div>
       <div class="stat-row"><span>Speed</span><b>${(1 / st.spd).toFixed(2)} /s</b></div>
       <div class="stat-row"><span>Gear</span><b>${['Plain', 'Polished', 'Glowing'][tier]}</b></div>
-      <p class="muted">${d.role === 'front' ? 'Fights up front.' : 'Fights from the back row.'} ${save.built.forge ? 'Upgrade gear at the Forge.' : 'Build the Forge to upgrade gear.'}</p>
+      <p class="muted">${d.role === 'front' ? 'Fights up front.' : 'Fights from the back row.'} Levels come from battles (+2.5% health and power each). ${save.built.forge ? 'Upgrade gear at the Forge.' : 'Build the Forge to upgrade gear.'}</p>
     </div>`;
   void g;
   const it = itemOf(id);
@@ -318,11 +390,37 @@ function openBuilding(id) {
   if (id === 'gate') {
     body.append(el('p', '', `Seeded floors, branching paths and a boss waits at the bottom. Every delve is different.`));
     const bi = el('div', 'biome-row');
-    for (const k of Object.keys(BIOMES)) bi.append(el('span', `biome-chip ${save.biomes.includes(k) ? '' : 'locked'}`, save.biomes.includes(k) ? BIOMES[k].name : `${BIOMES[k].name} (beat a boss)`));
+    const choose = (k) => {
+      save.gateBiome = k;
+      persist();
+      sfx.uiTick();
+      openBuilding('gate');
+    };
+    const any = el('button', `biome-chip ${save.gateBiome === 'any' ? 'on' : ''}`, 'Surprise me');
+    any.onclick = () => choose('any');
+    bi.append(any);
+    for (const k of Object.keys(BIOMES)) {
+      if (save.biomes.includes(k)) {
+        const c = el('button', `biome-chip ${save.gateBiome === k ? 'on' : ''}`, BIOMES[k].name);
+        c.style.setProperty('--bc', BIOMES[k].accent);
+        c.onclick = () => choose(k);
+        bi.append(c);
+      } else {
+        bi.append(el('span', 'biome-chip locked', '??? · beat a boss'));
+        break; // only hint at the next one
+      }
+    }
     body.append(bi);
     const go = el('button', 'btn btn-go', 'Start a delve');
     go.onclick = () => (closeSheet(), startRun());
     body.append(go);
+    const d = dailyState();
+    const daily = el('div', 'daily');
+    daily.innerHTML = `${icon('calendar', '#7fc8ff')}<div><b>Daily delve</b><small>One map for the whole day, a new one tomorrow. ${d.cleared ? 'Cleared today!' : `First clear today: ${icon('ember')} +25.`} ${d.tries ? `Best floor ${d.best}/${ROWS + 1} · ${d.tries} ${d.tries === 1 ? 'try' : 'tries'}.` : ''}${d.streak ? ` Streak: ${d.streak}.` : ''}</small></div>`;
+    const dgo = el('button', 'btn btn-soft', 'Go');
+    dgo.onclick = () => (closeSheet(), startRun({ daily: true }));
+    daily.append(dgo);
+    body.append(daily);
     return openSheet({ title: b.name, note, body });
   }
   if (!lvl || lvl < b.costs.length) {
@@ -357,7 +455,7 @@ function forgeBody() {
         persist();
         setEmbers(save.embers, true);
         sfx.purchase();
-        base.setHeroes(save.party, save.gear);
+        campHeroes();
         const h = base.heroAt(id);
         if (h) {
           h.char.spawn(0);
@@ -389,6 +487,8 @@ function itemTileIcon(it, size = '') {
  */
 function stashLoot(items) {
   for (const it of items) {
+    save.seen.items[it.rarity] = (save.seen.items[it.rarity] || 0) + 1;
+    if (it.effect) save.seen.items['fx:' + it.effect] = true;
     if (save.items.length < stashCap()) {
       save.items.push(it);
       continue;
@@ -449,11 +549,11 @@ function openItem(uid) {
       else {
         if (who) delete save.equip[who];
         save.equip[id] = uid;
-        const h = base.heroAt(id);
-        if (h) h.char.play('cheer', { dur: 1.2 });
         toast(`${HEROES[id].name} wears the ${it.name}.`);
       }
       persist();
+      campHeroes();
+      if (who !== id) base.heroAt(id)?.char.play('cheer', { dur: 1.2 });
       sfx.uiTick();
       openItem(uid);
     };
@@ -471,6 +571,7 @@ function openItem(uid) {
     if (who) delete save.equip[who];
     addEmbers(r.melt);
     persist();
+    if (who) campHeroes();
     openBuilding('storehouse');
   };
   body.append(melt);
@@ -513,7 +614,7 @@ function tavernBody() {
         else if (!inParty) return toast('The party is full (4 heroes).');
         persist();
         sfx.uiTick();
-        base.setHeroes(save.party, save.gear);
+        campHeroes();
         renderCampPanel();
         openBuilding('tavern');
       };
@@ -529,7 +630,7 @@ function tavernBody() {
         persist();
         setEmbers(save.embers, true);
         sfx.purchase();
-        base.setHeroes(save.party, save.gear);
+        campHeroes();
         const h = base.heroAt(id);
         if (h) h.char.spawn(0.2);
         toast(`${d.name} the ${d.cls} joins the camp!`);
@@ -613,6 +714,13 @@ function openSettings() {
   openSheet({ title: 'Settings', note: 'Your camp is saved in this browser.', body });
 }
 $('settings-btn').onclick = () => openSettings();
+
+function openJournal(tab = 'creatures') {
+  if (state !== 'camp') return;
+  sfx.uiTick();
+  openSheet({ title: 'Journal', note: journalNote(save), body: journalBody(save, tab, openJournal), wide: true });
+}
+$('book-btn').onclick = () => openJournal();
 $('sound-btn').onclick = () => {
   save.muted = !save.muted;
   setMuted(save.muted);
@@ -661,7 +769,7 @@ function makeParty() {
   for (const c of Object.values(party)) c.dispose();
   party = {};
   for (const h of save.run.heroes) {
-    const c = new Character(arenaChars, heroSpec(h.id, save.gear[h.id] || 0));
+    const c = new Character(arenaChars, heroSpec(h.id, save.gear[h.id] || 0, charmOf(h.id)));
     party[h.id] = c;
   }
   placeParty();
@@ -672,18 +780,40 @@ function placeParty(offsetX = 0) {
   for (const h of save.run.heroes) {
     const c = party[h.id];
     c.pos.copy(homes[h.id]).add(new THREE.Vector3(offsetX, 0, 0));
-    c.yaw = Math.PI / 2 - 0.45;
+    c.yaw = faceFor('hero', homes[h.id]);
     c.ko = h.hp <= 0;
     c.moving = false;
   }
 }
 
-function startRun() {
+// ---------------------------------------------------------------- daily delve
+
+function dayKey(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+/** Today's record (rolls over at local midnight; a missed day ends the streak). */
+function dailyState() {
+  const d = save.daily;
+  const today = dayKey();
+  if (d.date !== today) {
+    const y = new Date();
+    y.setDate(y.getDate() - 1);
+    if (d.lastClear !== dayKey(y) && d.lastClear !== today) d.streak = 0;
+    Object.assign(d, { date: today, best: 0, cleared: false, tries: 0 });
+  }
+  return d;
+}
+const dailySeed = (date) => [...`emberdelve:${date}`].reduce((h, c) => hash2(h, c.charCodeAt(0)), 0x2545f491);
+
+function startRun({ daily = false } = {}) {
   if (state !== 'camp') return;
-  const seed = randomSeed();
+  const seed = daily ? dailySeed(dayKey()) : randomSeed();
   const rng = rngFor(seed, 'start');
-  const biome = pick(rng, save.biomes);
+  const chosen = save.gateBiome !== 'any' && save.biomes.includes(save.gateBiome) ? save.gateBiome : null;
+  const biome = daily ? pick(rngFor(seed, 'biome'), save.biomes) : chosen || pick(rng, save.biomes);
+  if (daily) dailyState().tries++;
   save.run = {
+    daily: daily ? dayKey() : null,
     seed,
     biome,
     map: makeMap(seed),
@@ -706,6 +836,7 @@ function startRun() {
   base.cheer();
   state = 'descend';
   $('camp-panel').hidden = true;
+  $('book-btn').hidden = true;
   setTimeout(() => descend(), 700);
 }
 
@@ -714,7 +845,7 @@ function descend(resume = false) {
   fade(true);
   setTimeout(() => {
     const station = arenaStation(); // also sets the formation squeeze for this screen
-    arena.build(save.run.seed, save.run.biome, save.run.at || 'start', save.run.at ? nodeById(save.run.at).type : 'start', { animate: true });
+    arena.build(save.run.seed, save.run.biome, save.run.at || 'start', save.run.at ? nodeById(save.run.at).type : 'start', { animate: true, portrait: layout.portrait });
     makeParty();
     Object.values(party).forEach((c, i) => c.spawn(1.0 + i * 0.15));
     dungeonLight(true);
@@ -768,7 +899,7 @@ function showMap() {
   m.hidden = false;
   requestAnimationFrame(() => m.classList.add('open'));
   $('map-biome').textContent = BIOMES[run.biome].name;
-  $('map-depth').textContent = `Floor ${run.at ? nodeById(run.at).r + 1 : 0} of ${ROWS + 1}`;
+  $('map-depth').textContent = `${run.daily ? 'Daily delve · ' : ''}Floor ${run.at ? nodeById(run.at).r + 1 : 0} of ${ROWS + 1}`;
   // party health
   const ph = $('map-party');
   ph.innerHTML = '';
@@ -776,7 +907,7 @@ function showMap() {
     const d = HEROES[h.id];
     const k = Math.max(0, h.hp / h.maxHp);
     const chip = el('div', `mp-hero ${h.hp <= 0 ? 'down' : ''}`);
-    chip.innerHTML = `<img alt="" src="${portrait(h.id, save.gear[h.id] || 0, 72)}"><div class="mp-bar"><i style="width:${k * 100}%"></i></div><small>${Math.round(h.hp)}/${h.maxHp}</small>`;
+    chip.innerHTML = `<img alt="" src="${portrait(h.id, save.gear[h.id] || 0, 72)}"><b class="lv">${levelInfo(h.id).level}</b><div class="mp-bar"><i style="width:${k * 100}%"></i></div><small>${Math.round(h.hp)}/${h.maxHp}</small>`;
     chip.title = d.name;
     ph.append(chip);
   }
@@ -879,7 +1010,7 @@ async function travelTo(node) {
   fade(true);
   await wait(380);
   clearChest();
-  arena.build(save.run.seed, save.run.biome, node.id, node.type, { animate: true });
+  arena.build(save.run.seed, save.run.biome, node.id, node.type, { animate: true, portrait: layout.portrait });
   placeParty(-11);
   fade(false);
   // walk in from the left while the floor assembles
@@ -920,10 +1051,11 @@ function stepWalking(dt) {
     c.pos.y = FLOOR_Y;
   }
   if (k >= 1) {
+    const done = walking;
     walking = null;
-    for (const c of Object.values(party)) {
+    for (const [id, c] of Object.entries(party)) {
       c.moving = false;
-      c.yaw = Math.PI / 2 - 0.45;
+      c.yaw = faceFor('hero', done.to[id] || c.pos);
     }
   }
 }
@@ -985,6 +1117,7 @@ function startBattle(node) {
   state = 'battle';
   if (walking) stepWalking(walking.dur); // never start a fight with heroes still walking in
   const enc = encounterFor(run.seed, run.biome, node, Math.min(save.stats.bossesBeaten, 4));
+  for (const id of enc.ids) save.seen.met[id] = true;
   const heroes = run.heroes.map((h) => {
     const st = heroStats(h);
     const it = itemOf(h.id);
@@ -1003,6 +1136,10 @@ function startBattle(node) {
     kind: node.type,
     onEnd: (result) => endBattle(node, result, heroes),
     onChange: () => {},
+    onKill: (id) => {
+      save.seen.met[id] = true;
+      save.seen.beaten[id] = (save.seen.beaten[id] || 0) + 1;
+    },
   });
   battle.speed = save.speed || 1;
   battle.auto = !!save.auto;
@@ -1105,12 +1242,19 @@ function endBattle(node, result, heroes) {
   }
   run.fights++;
   const r = rngFor(run.seed, 'loot', node.id);
-  const gold = Math.round((node.type === 'boss' ? 60 : node.type === 'elite' ? 32 : 12 + node.r * 1.5 + r() * 6) * (relics.has('acorn') ? 1.35 : 1));
+  const gold = Math.round((node.type === 'boss' ? 60 : node.type === 'elite' ? 32 : 12 + node.r * 1.5 + r() * 6) * (relics.has('acorn') ? 1.35 : 1)) + (relics.has('map') ? 6 : 0);
   const embers = node.type === 'boss' ? 30 : node.type === 'elite' ? 10 : 4 + Math.floor(node.r / 2);
   run.gold += gold;
   addEmbers(embers);
-  const chestKind = node.type === 'boss' || node.type === 'elite' ? node.type : null;
-  const found = chestKind ? stashLoot(chestLoot(rngFor(run.seed, 'chest', node.id), chestKind, BIOMES[run.biome].tier || 0)) : [];
+  const tier = BIOMES[run.biome].tier || 0;
+  const xp = Math.round((node.type === 'boss' ? 60 : node.type === 'elite' ? 25 : 10) * (1 + 0.25 * tier));
+  const ups = awardXp(xp);
+  run.xp = (run.xp || 0) + xp;
+  run.ups = [...(run.ups || []), ...ups];
+  celebrateLevels(ups);
+  let chestKind = node.type === 'boss' || node.type === 'elite' ? node.type : null;
+  if (!chestKind && relics.has('key') && r() < 0.12) chestKind = 'elite'; // Rusty Key: a small chest
+  const found = chestKind ? stashLoot(chestLoot(rngFor(run.seed, 'chest', node.id), chestKind, tier)) : [];
   if (node.type === 'boss') {
     markDone(node);
     run.chest = found;
@@ -1121,7 +1265,7 @@ function endBattle(node, result, heroes) {
     run.relics.push(relic);
     refreshMaxHp();
   }
-  run.pending = { node: node.id, kind: 'reward', gold, embers, relic, items: found, options: rewardOptions(r) };
+  run.pending = { node: node.id, kind: 'reward', gold, embers, xp, ups, relic, items: found, options: rewardOptions(r) };
   persist();
   $('gold').textContent = run.gold;
   if (chestKind) playChest(chestKind, found).then(() => openReward(node));
@@ -1146,8 +1290,8 @@ async function playChest(kind, items) {
   clearChest();
   const col = RARITY[items[0].rarity].color;
   const c = new Character(arenaChars, chestSpec(kind, col), { scale: kind === 'boss' ? 1.75 : 1.4 });
-  c.pos.set(0.6 * layout.x, FLOOR_Y, 1.0);
-  c.yaw = -0.3;
+  c.pos.set(0.6 * layout.x, FLOOR_Y, layout.portrait ? 0 : 1.0);
+  c.yaw = layout.portrait ? -Math.PI / 2 + 0.3 : -0.3;
   c.spawn(0.35);
   chestChar = c;
   for (const h of Object.values(party)) if (!h.ko) (h.yaw = Math.atan2(c.pos.x - h.pos.x, c.pos.z - h.pos.z)), h.play('cheer', { dur: 1 });
@@ -1250,8 +1394,9 @@ function openReward(node) {
   const p = save.run.pending;
   const body = el('div', 'reward');
   const loot = el('div', 'loot');
-  loot.innerHTML = `<span class="pill gold">${icon('coin', '#ffcf45')} +${p.gold}</span><span class="pill ember">${icon('ember')} +${p.embers}</span>`;
+  loot.innerHTML = `<span class="pill gold">${icon('coin', '#ffcf45')} +${p.gold}</span><span class="pill ember">${icon('ember')} +${p.embers}</span>${p.xp ? `<span class="pill xp">+${p.xp} XP</span>` : ''}`;
   body.append(loot);
+  if (p.ups?.length) body.append(el('p', 'level-ups center', p.ups.map((u) => `<b>${HEROES[u.id].name}</b> reached level ${u.level}!`).join(' ')));
   if (p.relic) {
     const r = RELICS[p.relic];
     body.append(el('div', 'found', `${icon(r.icon, r.color)}<div><b>Found: ${r.name}</b><small>${r.text}</small></div>`));
@@ -1284,7 +1429,10 @@ function sitAroundFire() {
   ids.forEach((id, i) => {
     const c = party[id];
     const a = Math.PI * (1.12 + (ids.length > 1 ? i / (ids.length - 1) : 0.5) * 0.76);
-    c.pos.set(Math.cos(a) * 2.5, FLOOR_Y, 0.6 + Math.sin(a) * 1.9);
+    const right = Math.cos(a) * 2.5; // across the screen
+    const back = -Math.sin(a) * 1.9; // away from the camera
+    if (layout.portrait) c.pos.set(back, FLOOR_Y, 0.6 + right);
+    else c.pos.set(right, FLOOR_Y, 0.6 - back);
     c.yaw = Math.atan2(-c.pos.x, 0.6 - c.pos.z);
     c.ko = false;
     c.play('sit', { dur: 4, loop: true });
@@ -1294,7 +1442,7 @@ function sitAroundFire() {
 function openRest(node) {
   state = 'rest';
   sitAroundFire();
-  const healK = (save.built.garden || 0) >= 1 ? 0.5 : 0.35;
+  const healK = ((save.built.garden || 0) >= 1 ? 0.5 : 0.35) + (save.run.relics.includes('honey') ? 0.15 : 0);
   const body = el('div', 'rest');
   const grid = el('div', 'choices');
   const rest = el('button', 'choice');
@@ -1466,6 +1614,19 @@ function runOver(won, resumed = false, wait = null) {
     run.unlocked = next || null;
     for (const c of Object.values(party)) c.play('cheer', { dur: 3 });
   }
+  if (!resumed && run.daily) {
+    const d = dailyState();
+    if (d.date === run.daily) {
+      d.best = Math.max(d.best, won ? ROWS + 1 : run.at ? nodeById(run.at).r + 1 : 0);
+      if (won && !d.cleared) {
+        d.cleared = true;
+        d.streak = (d.streak || 0) + 1;
+        d.lastClear = d.date;
+        addEmbers(25);
+        run.dailyBonus = 25;
+      }
+    }
+  }
   persist();
   const body = el('div', 'over');
   const floor = run.at ? nodeById(run.at).r + 1 : 0;
@@ -1476,6 +1637,8 @@ function runOver(won, resumed = false, wait = null) {
       <div><b>${icon('ember')} ${run.embers}</b><small>embers earned</small></div>
     </div>
     <p class="muted center">${won ? `${BIOMES[run.biome].name} is quiet again.${run.unlocked ? ` A new place opens up below: <b>${BIOMES[run.unlocked].name}</b>.` : ''}` : 'The party slips back up the shaft, a bit dented. The embers they found come home with them.'}</p>`;
+  if (run.ups?.length) body.append(el('p', 'level-ups center', `Level ups: ${run.ups.map((u) => `<b>${HEROES[u.id].name} ${u.level}</b>`).join(', ')}`));
+  if (run.daily) body.append(el('p', 'muted center', `Daily delve: ${run.dailyBonus ? `cleared! ${icon('ember')} +${run.dailyBonus}` : `best today is floor ${save.daily.best}.`}`));
   if (won && run.chest?.length) body.append(lootBlock(run.chest));
   const back = el('button', 'btn btn-go', 'Back to camp');
   back.onclick = () => ascend();
@@ -1504,8 +1667,10 @@ function ascend() {
     rig.fly(CAMP, 1.8, () => base.cheer());
     fade(false);
     $('camp-panel').hidden = false;
+    $('book-btn').hidden = false;
     renderCampPanel();
     makeTags();
+    campHeroes(); // levels and trinkets may have changed
   }, 500);
 }
 
@@ -1604,6 +1769,7 @@ setEmbers(save.embers);
 rig.snap(CAMP);
 if (save.run) {
   $('camp-panel').hidden = true;
+  $('book-btn').hidden = true;
   descend(true);
 }
 frame();
@@ -1640,4 +1806,10 @@ window.vd = {
   },
   chest: (kind = 'elite') => playChest(kind, chestLoot(Math.random, kind, 1)),
   go: (type) => travelTo(save.run.map.nodes.find((n) => n.type === type)), // jump to the first node of a type
+  unlockAll: () => ((save.biomes = Object.keys(BIOMES)), persist()),
+  xp: (n = 100) => {
+    for (const id of save.roster) save.xp[id] = (save.xp[id] || 0) + n;
+    persist();
+  },
+  levelInfo,
 };

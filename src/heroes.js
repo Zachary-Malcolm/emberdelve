@@ -295,7 +295,23 @@ const BUILD = { bulwark, ranger, sage, keeper, duskblade, tinker };
  * Gear tiers show on the model: tier 0 plain steel, 1 polished with gold trim, 2 a glowing edge.
  * Returns the spec for a hero at a gear tier.
  */
-export function heroSpec(id, tier = 0) {
+/**
+ * charm = the worn trinket, drawn as a little charm hanging from the right hip:
+ * { color, rank } (rank 0 common .. 5 mythic; rare and up glow, mythics get a spark on top).
+ */
+function charmParts(charm) {
+  if (!charm) return [];
+  const glow = charm.rank >= 2;
+  const out = [
+    box('torso', 'leather', '#3a2e24', [2.9, 5.2, 3.05], [0.4, 1.2, 0.4]),
+    box('torso', glow ? 'magic' : 'metal', charm.color, [2.9, 4.0, 3.1], [1.8, 1.8, 0.7], [0, 0, 0.785]),
+  ];
+  if (charm.rank >= 4) out.push(box('torso', 'magic', '#ffffff', [2.9, 4.1, 3.5], [0.6, 0.6, 0.2], [0, 0, 0.785]));
+  if (charm.rank >= 5) out.push(part('torso', 'orb', 'magic', '#fff3c4', [2.9, 2.8, 3.1], [0.7, 0.7, 0.7]));
+  return out;
+}
+
+export function heroSpec(id, tier = 0, charm = null) {
   const g = {
     trim: tier >= 1 ? '#ffd34d' : '#d9a441',
     blade: tier >= 1 ? '#eef5fb' : '#c9d3dd',
@@ -303,7 +319,9 @@ export function heroSpec(id, tier = 0) {
     glow: tier >= 2 ? HEROES[id].glow : null,
     orb: tier >= 2 ? '#ffe08a' : '#ffb347',
   };
-  return BUILD[id](g);
+  const spec = BUILD[id](g);
+  if (charm) spec.parts = [...spec.parts, ...charmParts(charm)];
+  return spec;
 }
 
 /**

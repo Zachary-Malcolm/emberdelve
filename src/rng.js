@@ -22,3 +22,6 @@ export function hash2(a, b) {
 export function randomSeed() {
   return (Math.random() * 2 ** 32) >>> 0;
 }
+
+/** A random element of arr. */
+export const pick = (rng, arr) => arr[Math.floor(rng() * arr.length)];

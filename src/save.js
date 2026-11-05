@@ -15,6 +15,10 @@ export function fresh() {
     gear: {}, // hero id -> 0..2
     items: [], // trinkets in the Storehouse (see items.js)
     equip: {}, // hero id -> trinket uid
+    xp: {}, // hero id -> total experience (levels carry over between delves)
+    seen: { met: {}, beaten: {}, items: {} }, // the Journal: enemies met / defeated, trinkets found
+    daily: { date: '', best: 0, cleared: false, tries: 0, streak: 0, lastClear: '' },
+    gateBiome: 'any', // biome picked at the Delve Gate, or 'any'
     biomes: ['hollow'],
     stats: { runs: 0, wins: 0, best: 0, embersEarned: 0, bossesBeaten: 0 },
     run: null, // the delve in progress (see main.js startRun)
@@ -30,7 +34,14 @@ export function load() {
     if (!raw) return fresh();
     const s = JSON.parse(raw);
     const f = fresh();
-    return { ...f, ...s, built: { ...f.built, ...(s.built || {}) }, stats: { ...f.stats, ...(s.stats || {}) } };
+    return {
+      ...f,
+      ...s,
+      built: { ...f.built, ...(s.built || {}) },
+      stats: { ...f.stats, ...(s.stats || {}) },
+      seen: { ...f.seen, ...(s.seen || {}) },
+      daily: { ...f.daily, ...(s.daily || {}) },
+    };
   } catch {
     return fresh();
   }

@@ -4,7 +4,7 @@
 // mythic adds about +14% spread over two stats plus one small effect, so items are a nice nudge,
 // never a reason the party wins.
 
-import { pick } from './data.js';
+import { pick } from './rng.js';
 
 export const RARITIES = [
   { id: 'common', name: 'Common', color: '#b9b2a4', budget: 0.04, stats: 1, melt: 2 },
@@ -50,7 +50,7 @@ export const MYTHICS = {
   sparkheart: { name: 'Sparkheart', icon: 'heart', text: 'Critical hits give +1 spark (at most once every 3 s).' },
 };
 
-// chance of each rarity, per chest kind (biome tier 1 shifts a little weight upwards)
+// chance of each rarity, per chest kind (deeper biomes shift a little weight upwards)
 const ODDS = {
   elite: [50, 30, 14, 5, 1, 0],
   boss: [18, 30, 28, 15, 7, 2],
@@ -58,11 +58,13 @@ const ODDS = {
 
 function rollRarity(rng, kind, tier, floor = 0) {
   const w = ODDS[kind].slice();
-  if (tier) for (let i = 0; i < w.length - 1; i++) {
-    const move = w[i] * 0.2;
-    w[i] -= move;
-    w[i + 1] += move;
-  }
+  // each biome tier (up to 4) nudges a fifth of each rarity's weight one step up
+  for (let t = 0; t < Math.min(tier, 4); t++)
+    for (let i = w.length - 2; i >= 0; i--) {
+      const move = w[i] * 0.2;
+      w[i] -= move;
+      w[i + 1] += move;
+    }
   for (let i = 0; i < floor; i++) w[i] = 0;
   let r = rng() * w.reduce((a, b) => a + b, 0);
   for (let i = 0; i < w.length; i++) if ((r -= w[i]) <= 0) return RARITIES[i].id;

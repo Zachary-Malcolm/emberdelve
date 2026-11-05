@@ -9,11 +9,12 @@ existing game. Every visual is procedural voxels (no downloaded assets, fonts, s
 - Stack: Vite 8, three 0.187, tone 15. No other runtime deps. Sound/music are generated with Tone.js.
 - Run: `npm run dev` (launch config **voxel-battler**, port **5205**); `npm run build` → `dist/` (PWA, relative
   URLs, works on GitHub Pages); `npm run preview` (launch config **voxel-battler-build**, port 5206).
-- Character lab: `http://localhost:5205/gallery.html?set=heroes|hollow|grotto&tier=0..2` (dev only, buttons for
-  every animation). Use it when touching character designs.
+- Character lab: `http://localhost:5205/gallery.html?set=heroes|<biome key>&tier=0..2&charm=<rarity>&only=id1,id2`
+  (dev only, buttons for every animation). Use it when touching character designs.
 - Debug handle in the browser console: `vd` (`vd.save`, `vd.state`, `vd.battle`, `vd.addEmbers(100)`,
   `vd.win()`, `vd.lose()`, `vd.reset()`, `vd.loot('boss', n)` fills the Storehouse, `vd.chest('elite')` plays a
-  chest in the arena, `vd.go('elite'|'boss'|…)` jumps to the first node of that type during a delve).
+  chest in the arena, `vd.go('elite'|'boss'|…)` jumps to the first node of that type during a delve,
+  `vd.unlockAll()` opens every biome, `vd.xp(100)` gives the roster experience).
 - Save: localStorage key `vdelve.save.v1` (`src/save.js`). The current delve is saved too, so a reload resumes
   it (pending reward/shop/event, or the end-of-run sheet via `run.over`).
 - GitHub: https://github.com/Zachary-Malcolm/emberdelve (**private**, branch `master`). Ask Zach before making it public or turning on GitHub Pages.
@@ -53,9 +54,44 @@ existing game. Every visual is procedural voxels (no downloaded assets, fonts, s
   Sparkheart). Effects live in battle.js (`u.gear`).
 - **Camera**: in the dungeon the camera orbits and zooms like at camp (tilt capped so you can't look under the
   floor); the eye button in the top bar re-frames the arena.
+- **Portrait phones** (aspect < 0.9): the camera looks along +x from behind the heroes, so heroes are at the
+  bottom of the screen and enemies at the top, and characters are drawn big. `layout.portrait` (battle.js)
+  switches facing (`faceFor`: everyone turns inwards), `arena.build(…, { portrait })` keeps near decor low and
+  moves the braziers to the sides. Turning the phone between rooms rebuilds the room the new way.
+- **Hero levels** (main.js `levelInfo`): XP per won battle (10 / elite 25 / boss 60, +25% per biome tier) to
+  everyone in the party, kept between delves. Level cost 40, 70, 100, … up to level 10; +2.5% health and power
+  per level (max +22.5%). Level-ups pop over the hero; shown on hero chips, the hero sheet and map chips.
+- **Trinkets on models**: the worn trinket hangs as a little charm on the right hip (`heroSpec(id, tier, charm)`),
+  in the rarity colour; rare and up glow, legendary gets a sparkle, mythic an extra orb.
+- **Daily delve** (Delve Gate): the seed comes from the local date, so it is the same map all day. First clear of
+  the day gives +25 embers; best floor, tries and a clear streak are kept in `save.daily`.
+- **Delve Gate biome picker**: "Surprise me" or any unlocked biome (`save.gateBiome`); only the next locked one
+  is hinted.
+- **Journal** (book button, camp only; journal.js): creatures per biome (portrait or silhouette, times beaten,
+  trait), trinkets found by rarity + legendary effects + mythics, records. `save.seen` tracks it.
 - **Go home**: the map's "Go home" ends a delve early (embers and trinkets are kept).
-- **Biomes**: Mossy Hollow, then Crystal Grotto unlocks after the first boss (tier 1 = +3 enemy levels).
-  Beating bosses also raises later delve levels a little (`encounterFor`).
+- **Biomes**: Mossy Hollow → Crystal Grotto → Cinder Deeps, each unlocked by beating a boss (the order of
+  `BIOME_LIST`). `tier` adds +3 enemy levels per tier and better chest odds (capped at 4 tiers). Beating bosses
+  also raises later delve levels a little (`encounterFor`).
+- **Relics** (data.js `RELICS`, effects in `runMods` / main.js / battle.js): 20, incl. Copper Kettle (start shield),
+  Pocket Bellows (faster sparks), Sleepy Mask (enemies 8% slower), Honey Pot (better rests), Treasure Map
+  (+6 gold a battle), Rusty Key (12% small chest from normal battles). Events: 14 in `EVENTS`.
+
+## Adding biomes and enemies (built to grow to ~50 biomes / 100+ enemies)
+Each biome is one file in `src/biomes/` holding everything about it:
+- enemy model builders (functions returning a rig spec, see chars.js), `builders` map id → builder,
+- `enemies` map id → stats (`name, hp, atk, spd, attack, melee, scale, size, trait?, elite?/boss?, summon?,
+  bolt?, slamAll?: ring colour for a boss area slam every 3rd action, slamBurn?`),
+- `biome`: `key, tier, name, pools` (3–4 enemy groups), `elites, boss`, palette (`floor, floor2, wall, accent,
+  light, fog, sky`, optional `lava`), `floorMat(n)` → floor material per tile (`'ember'` = glowing, kept off the
+  fighting floor), `decor(add, rng, x, z, low)` → edge props (when `low`, only short things: they sit between
+  the camera and the fight).
+Then add it to `BIOME_LIST` in `src/biomes/index.js`. `enemies.js` merges everything into `ENEMIES`/`BIOMES` and
+throws on duplicate ids. The Journal, Delve Gate, gallery (`?set=<key>`) and unlock order pick it up
+automatically. New traits need a few lines in battle.js (`enemyAct`, `damage`) and a sentence in journal.js
+`TRAITS`. Keep a biome's enemies inside its palette family, and give every enemy one readable silhouette idea.
+Balance note for many biomes: enemy level grows +3 per tier, so very deep tiers will need a softer curve (or
+more hero growth) before there are dozens of them.
 
 ## Character design system (src/chars.js) — read before touching any model
 - Units: **1 px = 1/16 world unit**; a standard hero is ~22 px tall (≈1.4 world units, about 1.4 floor blocks).
@@ -84,11 +120,13 @@ existing game. Every visual is procedural voxels (no downloaded assets, fonts, s
 | battle.js | `Battle` (units, timers, AI, damage/heal/shield/stun/poison/burn, traits, cards, auto-cast, hp bars), formations (`layout.x` squeezes them on tall phones) |
 | chars.js | Voxel character rig + animators + `Character` class |
 | heroes.js | 6 hero builders, `HEROES` stats/roles, `STARTERS`, `RECRUITS` |
-| enemies.js | 11 enemies over 2 biomes (incl. 2 elites + 2 bosses), `ENEMIES`, `BIOMES` |
+| biomes/*.js | One file per biome: enemy models + stats, palette, floor + decor (`index.js` = `BIOME_LIST`, the unlock order) |
+| enemies.js | Registry: merges the biome files into `ENEMIES`, `BIOMES`, `enemySpec`, `biomeEnemies` |
+| journal.js | The Journal sheet (creatures, trinkets, records) and trait descriptions |
 | data.js | Seeded helpers, `ABILITIES`, `RELICS`, `makeMap`, `encounterFor`, `enemyStats`, `EVENTS` |
 | items.js | Trinket rarities, stats, effects, mythics, chest drop odds (`chestLoot`), Storehouse sizes |
 | chest.js | Voxel loot chest on the character rig with its own animator (`spec.animate`) |
-| arena.js | `Arena`: builds each room as a floating rock chunk at y = −140 (floor, back wall, edge decor, braziers, campfire/stall/shrine) |
+| arena.js | `Arena`: builds each room as a floating rock chunk at y = −140 (floor, back wall, the biome's edge decor, braziers, campfire/stall/shrine); portrait option |
 | fx.js | `BattleFX`: projectiles, bursts, rings, bolts, shield bubbles, ice, floating numbers, screen shake |
 | base.js | `Base`: the camp island, building sites, building drop-in, camp heroes |
 | portraits.js | Renders a hero/enemy head-and-shoulders PNG (cached) for the UI |
@@ -116,8 +154,14 @@ existing game. Every visual is procedural voxels (no downloaded assets, fonts, s
   width for the reward and Storehouse sheets. Mythic effects checked in a boss fight without errors (Phoenix
   revive seen); their exact numbers are not tuned by play yet.
 
+- 2026-11-05 (later): Cinder Deeps in the real game on a tall phone-shaped pane (portrait layout: battle,
+  elite with enrage + chest, boss with summons, burning slams, victory sheet with level-ups), hero levels and
+  XP, Copper Kettle shields, Journal (all three tabs), Delve Gate biome picker + daily delve start, hero sheet
+  XP bar, the charm on a camp hero, and switching to a wide screen mid-delve (room rebuilt side-on).
+  Not verified: the daily clear bonus and streak (needs a full daily win), Rusty Key / Treasure Map / Honey Pot /
+  Sleepy Mask / Pocket Bellows in play, every new event.
+
 ## Ideas / next steps
-- Portrait phones: a vertical battle layout (heroes bottom, enemies top) would let characters be bigger.
-- More biomes (each = 5–6 enemies, an elite, a boss, decor function, palette), more events and relics.
-- Hero levels that persist between delves; a codex of met enemies; daily seeded delve.
+- More biomes (each = 5–6 enemies, an elite, a boss, decor, palette): see "Adding biomes" above.
+- Kilnkeeper and Cinder Crab are only checked in the gallery so far.
 - Sentinel's mask could read less like a bucket; Grubkin ears could be bigger.

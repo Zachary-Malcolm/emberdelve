@@ -47,8 +47,11 @@ export class Arena {
     for (const t of this.torches) t.light.intensity = t.base = 0;
   }
 
-  /** Build a room. kind: fight | elite | boss | rest | shop | event. */
-  build(seed, biomeKey, nodeId, kind, { animate = true } = {}) {
+  /**
+   * Build a room. kind: fight | elite | boss | rest | shop | event.
+   * portrait: the camera looks along +x from behind the heroes (tall phones), so the near side is x < 0.
+   */
+  build(seed, biomeKey, nodeId, kind, { animate = true, portrait = false } = {}) {
     this.clear();
     const biome = BIOMES[biomeKey];
     this.biome = biome;
@@ -80,7 +83,11 @@ export class Arena {
       const n = Math.sin(x * 0.7 + p1) + Math.cos(z * 0.9 + p2) + (cell() - 0.5);
       for (let k = 0; k < depth; k++) {
         if (k >= 1 && k < depth - 1 && k < shallow) continue;
-        if (k === 0) add(x, 0, z, n > 1.0 ? pick(cell, biome.floor2) : pick(cell, biome.floor), { mat: biomeKey === 'hollow' ? (n > 1 ? 'dirt' : 'moss') : n > 1 ? 'stone' : 'rock' });
+        if (k === 0) {
+          let mat = biome.floorMat ? biome.floorMat(n) : n > 1 ? 'stone' : 'rock';
+          if (mat === 'ember' && Math.abs(x) < 7 && Math.abs(z) < 3.6) mat = 'stone'; // glowing tiles only round the edges
+          add(x, 0, z, mat === 'ember' ? biome.lava || biome.accent : n > 1.0 ? pick(cell, biome.floor2) : pick(cell, biome.floor), { mat });
+        }
         else add(x, -k, z, pick(cell, biome.wall), { mat: 'rock' });
       }
     }
@@ -107,14 +114,15 @@ export class Arena {
       const rim = dAt(x + 1, z) && dAt(x - 1, z) && dAt(x, z + 1) && dAt(x, z - 1);
       if (!inFloor && rim && z !== wallZ) spots.push([x, z]);
     }
-    const decor = biomeKey === 'hollow' ? hollowDecor : grottoDecor;
-    for (const [x, z] of spots) if (rng() < (z > 3 ? 0.3 : 0.42)) decor(add, rng, x, z, z > 0.5); // only low things in front of the camera
+    // only low things between the camera and the fight
+    const near = portrait ? (x) => x < -5.5 : (x, z) => z > 0.5;
+    for (const [x, z] of spots) if (rng() < (z > 3 ? 0.3 : 0.42)) biome.decor(add, rng, x, z, near(x, z));
 
     // braziers at the back corners
-    const tx = 7.5;
+    // (portrait: either side of the fight, level with the enemies, so they never hide a hero)
     this.torches.forEach((t, i) => {
-      const x = i ? tx : -tx;
-      const z = -3.8;
+      const x = portrait ? 3.5 : i ? 7.5 : -7.5;
+      const z = portrait ? (i ? 4.8 : -4.6) : -3.8;
       add(x, 1, z, '#5d6470', { mat: 'metal', shape: 'post', s: [1.4, 1, 1.4] });
       add(x, 2, z, '#5d6470', { mat: 'metal', shape: 'post', s: [1.4, 1, 1.4] });
       add(x, 2.75, z, '#3a3f4a', { mat: 'metal', shape: 'slab', s: [1.3, 0.8, 1.3] });
@@ -160,39 +168,6 @@ export class Arena {
       this.fx.smoke(f.x + (Math.random() - 0.5) * 0.4, f.y, f.z + (Math.random() - 0.5) * 0.4);
     }
   }
-}
-
-function hollowDecor(add, rng, x, z, low = false) {
-  const r = low ? 0.5 + rng() * 0.5 : rng();
-  if (r < 0.28) {
-    // toadstool
-    const h = 1 + Math.floor(rng() * 2);
-    for (let y = 1; y <= h; y++) add(x, y, z, '#efe2c4', { mat: 'plaster', shape: 'pillar', s: [0.5, 1, 0.5] });
-    add(x, h + 0.75, z, pick(rng, ['#e0533a', '#8d5fc4', '#e0533a']), { mat: 'cloth', shape: 'dome', s: [1.6 + h * 0.3, 0.7, 1.6 + h * 0.3] });
-  } else if (r < 0.5) add(x, 0.85, z, pick(rng, ['#4f9a3c', '#62c04a', '#3f7d3a']), { mat: 'leaves', shape: 'blob', s: 0.6 + rng() * 0.5, deco: 1 });
-  else if (r < 0.62) add(x, 0.7, z, pick(rng, ['#7a7468', '#6f6a5e']), { mat: 'rock', shape: 'rock', s: 0.6 + rng() * 0.6, deco: 1 });
-  else if (r < 0.78) {
-    add(x, 0.75, z, '#9fe38a', { mat: 'magic', shape: 'orb', s: 0.5, deco: 1 });
-    add(x, 0.6, z, '#efe2c4', { mat: 'plaster', shape: 'post', s: [0.6, 0.3, 0.6], deco: 1 });
-  } else if (r < 0.9) add(x, 0.75, z, '#6b4a2f', { mat: 'log', shape: 'logx', r: Math.floor(rng() * 4), s: [1.6, 0.6, 0.6], deco: 1 });
-  else add(x, 0.6, z, pick(rng, ['#ff8fb1', '#ffd34d', '#ffffff']), { mat: 'cloth', shape: 'orb', s: 0.5, deco: 1 });
-}
-
-function grottoDecor(add, rng, x, z, low = false) {
-  const r = low ? 0.6 + rng() * 0.4 : rng();
-  if (r < 0.35) {
-    const c = pick(rng, ['#7fd6e8', '#b88cff', '#a6ecff']);
-    const h = 1 + rng() * 1.6;
-    add(x, 0.5 + h / 2, z, c, { mat: 'magic', shape: 'spire', s: [0.8, h, 0.8], j: 0.02 });
-    if (rng() < 0.6) add(x + 0.35, 0.9, z + 0.3, c, { mat: 'magic', shape: 'spire', s: [0.5, 0.9, 0.5], j: 0.02 });
-  } else if (r < 0.6) {
-    const h = 1 + Math.floor(rng() * 2);
-    add(x, 0.5 + h / 2, z, pick(rng, ['#5a6478', '#4e5769']), { mat: 'rock', shape: 'spire', s: [1.1, h, 1.1] });
-  } else if (r < 0.75) add(x, 0.7, z, pick(rng, ['#646e83', '#5a6478']), { mat: 'rock', shape: 'rock', s: 0.6 + rng() * 0.6, deco: 1 });
-  else if (r < 0.85) {
-    add(x, 0.62, z, '#ece4cf', { mat: 'bone', shape: 'logx', s: [0.9, 0.25, 0.25], r: Math.floor(rng() * 4), deco: 1 });
-    add(x + 0.2, 0.7, z + 0.2, '#ece4cf', { mat: 'bone', shape: 'cube', s: 0.35, deco: 1 });
-  } else add(x, 0.6, z, '#3d4a63', { mat: 'water', shape: 'slab', s: [1, 0.25, 1], deco: 1 });
 }
 
 function campfire(add, x, z, fires) {

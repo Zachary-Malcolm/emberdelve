@@ -288,10 +288,11 @@ export class Base {
 
   // ------------------------------------------------------------ heroes at camp
 
-  setHeroes(list, tiers) {
+  /** charms: hero id -> { color, rank } of the trinket they wear (see heroSpec). */
+  setHeroes(list, tiers, charms = {}) {
     for (const h of this.heroes) h.char.dispose();
     this.heroes = list.map((id, i) => {
-      const char = new Character(this.charBatch, heroSpec(id, tiers[id] || 0));
+      const char = new Character(this.charBatch, heroSpec(id, tiers[id] || 0, charms[id]));
       const a = (i / list.length) * Math.PI * 2 + 0.6;
       char.pos.set(Math.cos(a) * 2.6, 0.5, Math.sin(a) * 2.6 + 0.4);
       char.yaw = Math.atan2(-char.pos.x, -char.pos.z);
