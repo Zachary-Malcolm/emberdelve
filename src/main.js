@@ -18,6 +18,8 @@ import { load, store, wipe } from './save.js';
 import { randomSeed } from './rng.js';
 import { portrait } from './portraits.js';
 import { icon } from './icons.js';
+import { RARITY, chestLoot, itemIcon, effectText, statLines, STASH } from './items.js';
+import { chestSpec } from './chest.js';
 
 // ---------------------------------------------------------------- setup
 
@@ -154,13 +156,23 @@ function tickTimers(dt) {
 
 // ---------------------------------------------------------------- hero stats
 
+/** The trinket a hero wears, or null. */
+function itemOf(heroId) {
+  const uid = save.equip[heroId];
+  return uid ? save.items.find((i) => i.uid === uid) || null : null;
+}
+function holderOf(uid) {
+  return Object.keys(save.equip).find((k) => save.equip[k] === uid) || null;
+}
+
 function heroStats(h) {
   const d = HEROES[h.id];
   const g = 1 + 0.15 * (save.gear[h.id] || 0);
+  const it = itemOf(h.id)?.stats || {};
   const relics = new Set(save.run?.relics || []);
-  const maxHp = Math.round(d.hp * g * (1 + (h.trainHp || 0)) * (1 + (h.tough || 0)) * (relics.has('bark') ? 1.15 : 1));
-  const atk = d.atk * g * (1 + (h.trainAtk || 0));
-  return { maxHp, atk, spd: d.spd };
+  const maxHp = Math.round(d.hp * g * (1 + (it.hp || 0)) * (1 + (h.trainHp || 0)) * (1 + (h.tough || 0)) * (relics.has('bark') ? 1.15 : 1));
+  const atk = d.atk * g * (1 + (it.atk || 0)) * (1 + (h.trainAtk || 0));
+  return { maxHp, atk, spd: d.spd / (1 + (it.spd || 0)) };
 }
 
 /** Keep current health in step when max health changes (relics, training). */
@@ -251,17 +263,26 @@ function openHero(id) {
   const d = HEROES[id];
   const tier = save.gear[id] || 0;
   const g = 1 + 0.15 * tier;
+  const st = heroStats({ id });
   const body = el('div', 'hero-sheet');
   body.innerHTML = `
     <img class="hero-big" alt="" src="${portrait(id, tier, 192)}">
     <div class="hero-info">
       <p>${d.blurb}</p>
-      <div class="stat-row"><span>Health</span><b>${Math.round(d.hp * g)}</b></div>
-      <div class="stat-row"><span>Power</span><b>${Math.round(d.atk * g)}</b></div>
-      <div class="stat-row"><span>Speed</span><b>${(1 / d.spd).toFixed(2)} /s</b></div>
+      <div class="stat-row"><span>Health</span><b>${st.maxHp}</b></div>
+      <div class="stat-row"><span>Power</span><b>${Math.round(st.atk)}</b></div>
+      <div class="stat-row"><span>Speed</span><b>${(1 / st.spd).toFixed(2)} /s</b></div>
       <div class="stat-row"><span>Gear</span><b>${['Plain', 'Polished', 'Glowing'][tier]}</b></div>
       <p class="muted">${d.role === 'front' ? 'Fights up front.' : 'Fights from the back row.'} ${save.built.forge ? 'Upgrade gear at the Forge.' : 'Build the Forge to upgrade gear.'}</p>
     </div>`;
+  void g;
+  const it = itemOf(id);
+  const slot = el('button', `trinket-slot ${it ? `r-${it.rarity}` : 'empty'}`);
+  slot.innerHTML = it
+    ? `${itemTileIcon(it)}<span><b>${it.name}</b><small>${RARITY[it.rarity].name} · ${[...statLines(it), effectText(it)].filter(Boolean).join(' · ')}</small></span>`
+    : `${icon('chest', '#b9b2a4')}<span><b>No trinket</b><small>Elites and bosses drop chests. Give trinkets out at the Storehouse.</small></span>`;
+  slot.onclick = () => openBuilding('storehouse');
+  body.append(slot);
   openSheet({ title: `${d.name} the ${d.cls}`, body });
 }
 
@@ -313,6 +334,7 @@ function openBuilding(id) {
     body.append(btn);
   }
   if (lvl && id === 'forge') body.prepend(forgeBody());
+  if (lvl && id === 'storehouse') body.prepend(stashBody());
   if (lvl && id === 'tavern') body.prepend(tavernBody());
   if (lvl && b.costs.length > 1) body.prepend(el('p', 'level-line', `Level ${lvl} of ${b.costs.length}`));
   openSheet({ title: b.name, note, body });
@@ -348,6 +370,129 @@ function forgeBody() {
     } else row.append(el('span', 'done', 'Max'));
     wrap.append(row);
   }
+  return wrap;
+}
+
+// ---------------------------------------------------------------- trinkets (Storehouse)
+
+function stashCap() {
+  return STASH[Math.min(STASH.length - 1, save.built.storehouse || 1)];
+}
+
+function itemTileIcon(it, size = '') {
+  return `<span class="item-ico r-${it.rarity} ${size}">${icon(itemIcon(it), RARITY[it.rarity].color)}</span>`;
+}
+
+/**
+ * Put chest loot into the Storehouse. When it is full, the weakest spare trinket (not worn by anyone)
+ * is melted to make room if the new one is rarer; otherwise the new one is melted into embers.
+ */
+function stashLoot(items) {
+  for (const it of items) {
+    if (save.items.length < stashCap()) {
+      save.items.push(it);
+      continue;
+    }
+    const worn = new Set(Object.values(save.equip));
+    const spare = save.items.filter((x) => !worn.has(x.uid)).sort((a, b) => RARITY[a.rarity].rank - RARITY[b.rarity].rank)[0];
+    if (spare && RARITY[spare.rarity].rank < RARITY[it.rarity].rank) {
+      save.items = save.items.filter((x) => x !== spare);
+      save.items.push(it);
+      it.replaced = { name: spare.name, melt: RARITY[spare.rarity].melt };
+      addEmbers(it.replaced.melt);
+    } else {
+      it.melted = RARITY[it.rarity].melt;
+      addEmbers(it.melted);
+    }
+  }
+  return items;
+}
+
+function stashBody() {
+  const wrap = el('div', 'stash');
+  const cap = stashCap();
+  wrap.append(el('p', 'muted', `${save.items.length} of ${cap} spaces used. Elites and bosses drop chests; tap a trinket to give it to a hero.`));
+  const grid = el('div', 'item-grid');
+  const sorted = save.items.slice().sort((a, b) => RARITY[b.rarity].rank - RARITY[a.rarity].rank);
+  for (const it of sorted) {
+    const t = el('button', `item-tile r-${it.rarity}`);
+    const who = holderOf(it.uid);
+    t.innerHTML = `${icon(itemIcon(it), RARITY[it.rarity].color)}${who ? `<img class="worn" alt="" src="${portrait(who, save.gear[who] || 0, 48)}">` : ''}`;
+    t.title = it.name;
+    t.onclick = () => openItem(it.uid);
+    grid.append(t);
+  }
+  for (let i = sorted.length; i < cap; i++) grid.append(el('span', 'item-tile empty'));
+  wrap.append(grid);
+  return wrap;
+}
+
+function openItem(uid) {
+  const it = save.items.find((i) => i.uid === uid);
+  if (!it) return openBuilding('storehouse');
+  const r = RARITY[it.rarity];
+  const body = el('div', 'item-sheet');
+  const head = el('div', 'item-head');
+  head.innerHTML = `${itemTileIcon(it, 'big')}<div><span class="rarity-tag r-${it.rarity}">${r.name}</span><ul class="item-stats">${statLines(it)
+    .map((l) => `<li>${l}</li>`)
+    .join('')}${it.effect ? `<li class="effect">${effectText(it)}</li>` : ''}</ul></div>`;
+  body.append(head);
+  body.append(el('p', 'muted', 'Give it to:'));
+  const heroes = el('div', 'give-row');
+  const who = holderOf(uid);
+  for (const id of save.roster) {
+    const b = el('button', `give ${who === id ? 'on' : ''}`);
+    const other = itemOf(id);
+    b.innerHTML = `<img alt="" src="${portrait(id, save.gear[id] || 0, 72)}"><small>${HEROES[id].name}</small>${other && other.uid !== uid ? `<i class="has r-${other.rarity}"></i>` : ''}`;
+    b.onclick = () => {
+      if (who === id) delete save.equip[id];
+      else {
+        if (who) delete save.equip[who];
+        save.equip[id] = uid;
+        const h = base.heroAt(id);
+        if (h) h.char.play('cheer', { dur: 1.2 });
+        toast(`${HEROES[id].name} wears the ${it.name}.`);
+      }
+      persist();
+      sfx.uiTick();
+      openItem(uid);
+    };
+    heroes.append(b);
+  }
+  body.append(heroes);
+  const melt = el('button', 'btn btn-soft small melt', `Melt down · ${icon('ember')} +${r.melt}`);
+  melt.onclick = () => {
+    if (!melt.dataset.armed && (r.rank >= 2 || who)) {
+      melt.dataset.armed = '1';
+      melt.innerHTML = `Tap again to melt it for ${icon('ember')} ${r.melt}`;
+      return;
+    }
+    save.items = save.items.filter((i) => i.uid !== uid);
+    if (who) delete save.equip[who];
+    addEmbers(r.melt);
+    persist();
+    openBuilding('storehouse');
+  };
+  body.append(melt);
+  openSheet({ title: it.name, body, onClose: () => openBuilding('storehouse'), tone: `item r-${it.rarity}` });
+}
+
+/** Loot cards for the reward and end-of-delve sheets. */
+function lootBlock(items) {
+  const wrap = el('div', 'chest-loot');
+  for (const it of items) {
+    const r = RARITY[it.rarity];
+    const row = el('div', `found item-found r-${it.rarity}`);
+    row.innerHTML = `${itemTileIcon(it)}<div><span class="rarity-tag r-${it.rarity}">${r.name}</span><b>${it.name}</b><small>${[...statLines(it), effectText(it)].filter(Boolean).join(' · ')}</small>${
+      it.melted
+        ? `<small class="melted">Storehouse full: melted into ${icon('ember')} ${it.melted}.</small>`
+        : it.replaced
+          ? `<small class="melted">Storehouse full: your ${it.replaced.name} was melted to make room (${icon('ember')} ${it.replaced.melt}).</small>`
+          : ''
+    }</div>`;
+    wrap.append(row);
+  }
+  if (items.some((it) => !it.melted)) wrap.append(el('p', 'muted center small-note', 'Sent home to the Storehouse. Hand trinkets out at camp.'));
   return wrap;
 }
 
@@ -575,7 +720,7 @@ function descend(resume = false) {
     dungeonLight(true);
     setMood('delve');
     rig.snap(station);
-    view.controls.enabled = false;
+    dungeonCamera(true);
     fade(false);
     $('gold-pill').hidden = false;
     $('gold').textContent = save.run.gold;
@@ -587,6 +732,20 @@ function descend(resume = false) {
     }, resume ? 1300 : 1900);
   }, 500);
 }
+
+/** In the dungeon the camera can orbit and zoom around the arena too; the eye button re-frames it. */
+function dungeonCamera(on) {
+  const c = view.controls;
+  c.enabled = true;
+  c.minDistance = on ? 6 : 18;
+  c.maxDistance = on ? 60 : 140;
+  c.maxPolarAngle = on ? 1.2 : 1.45; // no peeking under the floor chunk
+  $('view-btn').hidden = !on;
+}
+$('view-btn').onclick = () => {
+  sfx.uiTick();
+  rig.fly(arenaStation(), 0.6);
+};
 
 function nodeById(id) {
   return save.run.map.nodes.find((n) => n.id === id);
@@ -684,6 +843,22 @@ function hideMap() {
   $('map').hidden = true;
 }
 
+$('map-home').onclick = () => {
+  const b = $('map-home');
+  if (!b.dataset.armed) {
+    b.dataset.armed = '1';
+    b.textContent = 'Tap to confirm';
+    setTimeout(() => {
+      delete b.dataset.armed;
+      b.textContent = 'Go home';
+    }, 2500);
+    return;
+  }
+  delete b.dataset.armed;
+  b.textContent = 'Go home';
+  runOver(false);
+};
+
 $('map-peek').onclick = () => {
   const m = $('map');
   m.classList.toggle('peek');
@@ -703,6 +878,7 @@ async function travelTo(node) {
   await after(650);
   fade(true);
   await wait(380);
+  clearChest();
   arena.build(save.run.seed, save.run.biome, node.id, node.type, { animate: true });
   placeParty(-11);
   fade(false);
@@ -795,7 +971,10 @@ function resumePending() {
   const node = nodeById(p.node);
   if (p.kind === 'reward') return openReward(node);
   if (p.kind === 'shop') return openShop(node);
-  if (p.kind === 'event') return openEvent(node, EVENTS.find((e) => e.id === p.event));
+  if (p.kind === 'event') {
+    const ev = EVENTS.find((e) => e.id === p.event);
+    return p.outcome ? showEventOutcome(node, ev, p.outcome) : openEvent(node, ev);
+  }
   showMap();
 }
 
@@ -808,7 +987,9 @@ function startBattle(node) {
   const enc = encounterFor(run.seed, run.biome, node, Math.min(save.stats.bossesBeaten, 4));
   const heroes = run.heroes.map((h) => {
     const st = heroStats(h);
-    return { id: h.id, hp: h.hp, maxHp: st.maxHp, atk: st.atk, spd: st.spd, char: party[h.id], ref: h };
+    const it = itemOf(h.id);
+    const gear = it ? { crit: it.stats.crit || 0, guard: it.stats.guard || 0, effect: it.effect || null } : {};
+    return { id: h.id, hp: h.hp, maxHp: st.maxHp, atk: st.atk, spd: st.spd, char: party[h.id], ref: h, gear };
   });
   battle = new Battle({
     charBatch: arenaChars,
@@ -928,19 +1109,72 @@ function endBattle(node, result, heroes) {
   const embers = node.type === 'boss' ? 30 : node.type === 'elite' ? 10 : 4 + Math.floor(node.r / 2);
   run.gold += gold;
   addEmbers(embers);
+  const chestKind = node.type === 'boss' || node.type === 'elite' ? node.type : null;
+  const found = chestKind ? stashLoot(chestLoot(rngFor(run.seed, 'chest', node.id), chestKind, BIOMES[run.biome].tier || 0)) : [];
   if (node.type === 'boss') {
     markDone(node);
-    return runOver(true);
+    run.chest = found;
+    return runOver(true, false, playChest(chestKind, found));
   }
   const relic = node.type === 'elite' ? newRelic(r) : null;
   if (relic) {
     run.relics.push(relic);
     refreshMaxHp();
   }
-  run.pending = { node: node.id, kind: 'reward', gold, embers, relic, options: rewardOptions(r) };
+  run.pending = { node: node.id, kind: 'reward', gold, embers, relic, items: found, options: rewardOptions(r) };
   persist();
   $('gold').textContent = run.gold;
-  setTimeout(() => openReward(node), 300);
+  if (chestKind) playChest(chestKind, found).then(() => openReward(node));
+  else setTimeout(() => openReward(node), 300);
+}
+
+// ---------------------------------------------------------------- the loot chest
+
+let chestChar = null;
+const chestLight = new THREE.PointLight(0xffd36b, 0, 9, 1.6);
+arena.group.add(chestLight);
+
+function clearChest() {
+  chestChar?.dispose();
+  chestChar = null;
+  chestLight.intensity = 0;
+}
+
+/** A chest drops between the lines, rattles, pops open and the trinkets fly out. */
+async function playChest(kind, items) {
+  state = 'chest';
+  clearChest();
+  const col = RARITY[items[0].rarity].color;
+  const c = new Character(arenaChars, chestSpec(kind, col), { scale: kind === 'boss' ? 1.75 : 1.4 });
+  c.pos.set(0.6 * layout.x, FLOOR_Y, 1.0);
+  c.yaw = -0.3;
+  c.spawn(0.35);
+  chestChar = c;
+  for (const h of Object.values(party)) if (!h.ko) (h.yaw = Math.atan2(c.pos.x - h.pos.x, c.pos.z - h.pos.z)), h.play('cheer', { dur: 1 });
+  await after(800);
+  sfx.slam();
+  bfx.burst(c.pos.clone().setY(0.6), '#d8c8a8', 10, { speed: 2.5, up: 1.5, life: 0.5, size: 0.16, mat: 'plaster' });
+  await after(700);
+  c.openAt = c.t;
+  sfx.bash();
+  await after(700);
+  // the lid flings open
+  const top = c.pos.clone().setY(c.height * 0.75 + FLOOR_Y);
+  chestLight.color.set(col);
+  chestLight.position.copy(top);
+  chestLight.intensity = 9;
+  bfx.burst(top, col, 26, { speed: 3.4, up: 5, life: 0.9, size: 0.2 });
+  bfx.ring(c.pos, col, kind === 'boss' ? 2.8 : 2.2);
+  bfx.rise(c.pos, col, 18, 0.9);
+  sfx.card('aoe');
+  if (RARITY[items[0].rarity].rank >= 3) setTimeout(() => sfx.victory(), 250);
+  items.forEach((it, i) => {
+    const icol = RARITY[it.rarity].color;
+    const to = top.clone().add(new THREE.Vector3((i - (items.length - 1) / 2) * 1.4, 2.2, 0.6));
+    bfx.shoot('orb', top, to, { dur: 0.55, arc: 1.2, color: icol, onHit: () => (bfx.burst(to, icol, 14, { speed: 2.4, up: 1, life: 0.7, size: 0.16 }), bfx.text(to, RARITY[it.rarity].name, 'info')) });
+  });
+  for (const h of Object.values(party)) if (!h.ko) h.play('cheer', { dur: 1.6 });
+  await after(1500);
 }
 
 function newRelic(rng) {
@@ -1022,6 +1256,7 @@ function openReward(node) {
     const r = RELICS[p.relic];
     body.append(el('div', 'found', `${icon(r.icon, r.color)}<div><b>Found: ${r.name}</b><small>${r.text}</small></div>`));
   }
+  if (p.items?.length) body.append(lootBlock(p.items));
   body.append(el('p', 'muted center', 'Choose one:'));
   const grid = el('div', 'choices');
   for (const o of p.options) {
@@ -1193,15 +1428,10 @@ function openEvent(node, ev) {
     b.disabled = ch.need ? !ch.need(ctx) : false;
     b.onclick = () => {
       const out = ch.do(ctx);
+      if (save.run.pending) save.run.pending.outcome = out;
       sfx.purchase();
       persist();
-      const res = el('div', 'event');
-      res.append(el('p', 'event-text', out));
-      const go = el('button', 'btn btn-go', 'Continue');
-      go.onclick = () => completeNode(node);
-      res.append(go);
-      $('gold').textContent = save.run.gold;
-      openSheet({ title: ev.title, body: res, closable: false });
+      showEventOutcome(node, ev, out);
     };
     list.append(b);
   }
@@ -1209,9 +1439,20 @@ function openEvent(node, ev) {
   openSheet({ title: ev.title, body, closable: false });
 }
 
+function showEventOutcome(node, ev, out) {
+  state = 'event';
+  const res = el('div', 'event');
+  res.append(el('p', 'event-text', out));
+  const go = el('button', 'btn btn-go', 'Continue');
+  go.onclick = () => completeNode(node);
+  res.append(go);
+  $('gold').textContent = save.run.gold;
+  openSheet({ title: ev.title, body: res, closable: false });
+}
+
 // ---------------------------------------------------------------- end of a delve
 
-function runOver(won, resumed = false) {
+function runOver(won, resumed = false, wait = null) {
   const run = save.run;
   state = 'over';
   hideMap();
@@ -1235,10 +1476,14 @@ function runOver(won, resumed = false) {
       <div><b>${icon('ember')} ${run.embers}</b><small>embers earned</small></div>
     </div>
     <p class="muted center">${won ? `${BIOMES[run.biome].name} is quiet again.${run.unlocked ? ` A new place opens up below: <b>${BIOMES[run.unlocked].name}</b>.` : ''}` : 'The party slips back up the shaft, a bit dented. The embers they found come home with them.'}</p>`;
+  if (won && run.chest?.length) body.append(lootBlock(run.chest));
   const back = el('button', 'btn btn-go', 'Back to camp');
   back.onclick = () => ascend();
   body.append(back);
-  setTimeout(() => openSheet({ title: won ? 'The boss is beaten!' : 'Retreat!', body, closable: false, tone: won ? 'win' : 'lose' }), won ? 1400 : 900);
+  (wait || after(won ? 1400 : 900)).then(() => {
+    state = 'over';
+    openSheet({ title: won ? 'The boss is beaten!' : 'Retreat!', body, closable: false, tone: won ? 'win' : 'lose' });
+  });
 }
 
 function ascend() {
@@ -1246,6 +1491,7 @@ function ascend() {
   fade(true);
   setTimeout(() => {
     arena.clear();
+    clearChest();
     for (const c of Object.values(party)) c.dispose();
     party = {};
     save.run = null;
@@ -1253,7 +1499,7 @@ function ascend() {
     $('gold-pill').hidden = true;
     state = 'camp';
     setMood('camp');
-    view.controls.enabled = true;
+    dungeonCamera(false);
     rig.snap({ target: CAMP.target.clone().add(new THREE.Vector3(0, -10, 0)), dist: 30 });
     rig.fly(CAMP, 1.8, () => base.cheer());
     fade(false);
@@ -1333,6 +1579,10 @@ function frame() {
     for (const c of Object.values(party)) c.update(dt);
     bfx.update(dt);
   }
+  if (chestChar) {
+    chestChar.update(dt);
+    if (chestLight.intensity > 2.5) chestLight.intensity = Math.max(2.5, chestLight.intensity - dt * 4);
+  }
   tickMaterials(dt);
   tickTimers(dt);
   updateTags();
@@ -1383,4 +1633,11 @@ window.vd = {
   look: (station) => rig.snap(station),
   arenaStation,
   reset: () => (wipe(), location.reload()),
+  loot: (kind = 'boss', n = 1) => {
+    for (let i = 0; i < n; i++) stashLoot(chestLoot(Math.random, kind, 1));
+    persist();
+    return save.items.length;
+  },
+  chest: (kind = 'elite') => playChest(kind, chestLoot(Math.random, kind, 1)),
+  go: (type) => travelTo(save.run.map.nodes.find((n) => n.type === type)), // jump to the first node of a type
 };

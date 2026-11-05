@@ -9,10 +9,12 @@ export function fresh() {
     v: 1,
     seed: randomSeed(), // the home island's shape and nature
     embers: 0,
-    built: { gate: 1 }, // building id -> level
+    built: { gate: 1, storehouse: 1 }, // building id -> level
     roster: STARTERS.slice(),
     party: STARTERS.slice(),
     gear: {}, // hero id -> 0..2
+    items: [], // trinkets in the Storehouse (see items.js)
+    equip: {}, // hero id -> trinket uid
     biomes: ['hollow'],
     stats: { runs: 0, wins: 0, best: 0, embersEarned: 0, bossesBeaten: 0 },
     run: null, // the delve in progress (see main.js startRun)
@@ -27,7 +29,8 @@ export function load() {
     const raw = localStorage.getItem(KEY);
     if (!raw) return fresh();
     const s = JSON.parse(raw);
-    return { ...fresh(), ...s, stats: { ...fresh().stats, ...(s.stats || {}) } };
+    const f = fresh();
+    return { ...f, ...s, built: { ...f.built, ...(s.built || {}) }, stats: { ...f.stats, ...(s.stats || {}) } };
   } catch {
     return fresh();
   }

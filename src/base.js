@@ -23,6 +23,7 @@ export const BUILDINGS = {
   tavern: { name: 'Tavern', kind: 'tavern', x: -9, z: -4, rot: 3, costs: [30], text: 'Recruit new heroes and choose who delves.' },
   garden: { name: 'Herb Garden', kind: 'greenhouse', x: 9.5, z: 6, rot: 1, costs: [30, 55], text: 'Lv 1: campfires heal 50% instead of 35%. Lv 2: heroes also heal 8% after every battle.' },
   spire: { name: 'Spark Spire', kind: 'wizardtower', x: -10, z: 5.5, rot: 3, costs: [40, 70, 110], text: 'Lv 1: +2 sparks at the start of battles. Lv 2: sparks fill 20% faster. Lv 3: rewards offer one more choice.' },
+  storehouse: { name: 'Storehouse', kind: 'mushroomhouse', x: 4, z: 11.2, rot: 0, costs: [0, 45], text: 'Trinkets from chests are kept here. Give one to each hero, or melt spares into embers. Lv 2 holds 24 instead of 12.' },
   archive: { name: 'Relic Archive', kind: 'library', x: -3.5, z: 11, rot: 0, costs: [70], text: 'Start every delve with a random relic.' },
 };
 

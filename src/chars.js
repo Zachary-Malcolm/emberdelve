@@ -270,9 +270,14 @@ export class Character {
     if (this.debris) return this.updateDebris(dt);
 
     const pose = {};
-    const anim = ANIMS[this.spec.anim || 'human'] || ANIMS.human;
-    anim(this, pose);
-    commonLayers(this, pose);
+    if (this.spec.animate) {
+      this.spec.animate(this, pose); // props such as chests bring their own animator
+      spawnLayer(this, pose);
+    } else {
+      const anim = ANIMS[this.spec.anim || 'human'] || ANIMS.human;
+      anim(this, pose);
+      commonLayers(this, pose);
+    }
     this.applyPose(pose);
     this.applyColors();
   }
@@ -374,6 +379,13 @@ export class Character {
 
 /** Hurt recoil, flash, spawn drop + squash, blink, KO. Applied on top of every animator. */
 function commonLayers(c, P) {
+  spawnLayer(c, P);
+  const r = P.root;
+  // hurt: knocked back a step, leaning away, squashed
+  hurtEtc(c, P, r);
+}
+
+function spawnLayer(c, P) {
   const r = (P.root ||= {});
   // spawn: fall in from above with a stretch, land with a squash
   if (c.spawnT < 0) {
@@ -394,7 +406,9 @@ function commonLayers(c, P) {
       r.sz = (r.sz || 1) * (1 + s * 0.55);
     }
   }
-  // hurt: knocked back a step, leaning away, squashed
+}
+
+function hurtEtc(c, P, r) {
   if (c.hurtT < 0.45) {
     const k = Math.exp(-9 * c.hurtT) * Math.sin(Math.min(1, c.hurtT / 0.06) * Math.PI * 0.5) * (c.hurtK || 1);
     r.dz = (r.dz || 0) - 2.2 * k;

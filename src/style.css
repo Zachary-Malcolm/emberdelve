@@ -581,3 +581,108 @@ button:disabled { cursor: default; }
 }
 
 .bld > .btn { width: 100%; margin-top: 8px; }
+
+/* ------------------------------------------------------------ trinkets */
+
+.r-common { --rc: #b9b2a4; }
+.r-uncommon { --rc: #5fc27e; }
+.r-rare { --rc: #4f9cf0; }
+.r-epic { --rc: #a873f0; }
+.r-legendary { --rc: #f0a03a; }
+.r-mythic { --rc: #f0567f; }
+
+.item-ico {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 12px;
+  background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--rc) 22%, #fff), color-mix(in srgb, var(--rc) 10%, #fff));
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--rc) 70%, #fff);
+}
+.item-ico .ico { width: 28px; height: 28px; }
+.item-ico.big { width: 76px; height: 76px; border-radius: 18px; }
+.item-ico.big .ico { width: 52px; height: 52px; }
+.r-legendary.item-ico, .r-mythic.item-ico, .item-tile.r-legendary, .item-tile.r-mythic { animation: shine 2.4s ease-in-out infinite; }
+@keyframes shine { 50% { box-shadow: inset 0 0 0 2px var(--rc), 0 0 14px color-mix(in srgb, var(--rc) 60%, transparent); } }
+
+.rarity-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--rc);
+  margin-bottom: 2px;
+}
+
+.item-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 6px; margin-top: 8px; }
+.item-tile {
+  position: relative;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--rc) 20%, #fff), color-mix(in srgb, var(--rc) 8%, #fff));
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--rc) 70%, #fff), 0 3px 0 color-mix(in srgb, var(--rc) 40%, #d6cab4);
+  transition: transform 0.12s;
+}
+.item-tile:hover:not(.empty) { transform: translateY(-2px); }
+.item-tile .ico { width: 30px; height: 30px; }
+.item-tile.empty { background: #f1ebe0; box-shadow: inset 0 0 0 2px #e6dcc9; }
+.item-tile .worn { position: absolute; right: -4px; bottom: -4px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px #fff; }
+
+.item-head { display: flex; gap: 14px; align-items: center; }
+.item-stats { margin: 4px 0 0; padding: 0; list-style: none; font-weight: 700; font-size: 14px; }
+.item-stats li { padding: 2px 0; }
+.item-stats .effect { color: color-mix(in srgb, var(--rc) 75%, #000); }
+.sheet.item { box-shadow: 0 0 0 3px var(--rc), 0 16px 50px rgba(0, 0, 0, 0.3); }
+.give-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+.give {
+  position: relative;
+  border: 0;
+  border-radius: 14px;
+  padding: 6px 4px;
+  background: var(--soft);
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  font-weight: 800;
+}
+.give img { width: 42px; height: 42px; }
+.give small { font-size: 11.5px; }
+.give.on { background: #fff; box-shadow: inset 0 0 0 2.5px var(--rc), 0 3px 0 color-mix(in srgb, var(--rc) 50%, #d6cab4); }
+.give.on small::after { content: ' ✓'; color: var(--good); }
+.give .has { position: absolute; top: 5px; right: 6px; width: 9px; height: 9px; border-radius: 3px; background: var(--rc); }
+.melt { margin-top: 12px; }
+
+.trinket-slot {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  padding: 8px;
+  border-radius: 14px;
+  background: #fff;
+  text-align: left;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--rc, #e6dcc9) 60%, #fff);
+}
+.trinket-slot.empty { --rc: #d8cdb8; }
+.trinket-slot > .ico { width: 38px; height: 38px; }
+.trinket-slot span:last-child { display: grid; min-width: 0; }
+.trinket-slot small { color: var(--ink-soft); font-weight: 600; font-size: 12.5px; }
+
+.chest-loot { display: grid; gap: 6px; margin: 6px 0; }
+.item-found { background: color-mix(in srgb, var(--rc) 10%, #fff); box-shadow: inset 0 0 0 2px var(--rc); animation: deal 0.45s both cubic-bezier(.2, 1.3, .4, 1); }
+.item-found + .item-found { animation-delay: 0.12s; }
+.item-found b { display: block; }
+.melted { color: var(--go-dark) !important; }
+.small-note { font-size: 12.5px; margin: 0; }
+.map-btns { display: flex; gap: 6px; }
+.item-found .rarity-tag { justify-self: start; }

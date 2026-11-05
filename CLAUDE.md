@@ -12,7 +12,8 @@ existing game. Every visual is procedural voxels (no downloaded assets, fonts, s
 - Character lab: `http://localhost:5205/gallery.html?set=heroes|hollow|grotto&tier=0..2` (dev only, buttons for
   every animation). Use it when touching character designs.
 - Debug handle in the browser console: `vd` (`vd.save`, `vd.state`, `vd.battle`, `vd.addEmbers(100)`,
-  `vd.win()`, `vd.lose()`, `vd.reset()`).
+  `vd.win()`, `vd.lose()`, `vd.reset()`, `vd.loot('boss', n)` fills the Storehouse, `vd.chest('elite')` plays a
+  chest in the arena, `vd.go('elite'|'boss'|…)` jumps to the first node of that type during a delve).
 - Save: localStorage key `vdelve.save.v1` (`src/save.js`). The current delve is saved too, so a reload resumes
   it (pending reward/shop/event, or the end-of-run sheet via `run.over`).
 - GitHub: https://github.com/Zachary-Malcolm/emberdelve (**private**, branch `master`). Ask Zach before making it public or turning on GitHub Pages.
@@ -31,7 +32,8 @@ existing game. Every visual is procedural voxels (no downloaded assets, fonts, s
   (`BUILDINGS` in base.js): Delve Gate (start a run), Forge (gear tiers: +15% hp/power each, shows on the
   model), Tavern (party of up to 4, recruit Duskblade/Tinker), Herb Garden (better rests; L2 heals after
   fights), Spark Spire (L1 +2 starting sparks, L2 faster sparks, L3 an extra reward choice), Relic Archive
-  (start each delve with a random relic). Buildings drop in block by block (IslandFX). Heroes wander by day and
+  (start each delve with a random relic), Storehouse (built from the start: trinket stash, 12 slots, Lv 2 = 24).
+  Buildings drop in block by block (IslandFX). Heroes wander by day and
   sit round the fire at night. Tap a hero for their sheet; tap a building or its floating tag.
 - **Map**: 7 rows + boss (`makeMap` in data.js), non-crossing branching paths, seeded per run. Node types:
   battle, elite (drops a relic), event, peddler (shop), campfire (rest or train), boss.
@@ -41,6 +43,17 @@ existing game. Every visual is procedural voxels (no downloaded assets, fonts, s
   KO'd heroes revive at 30% after a won fight; losing a fight ends the delve (embers are kept).
 - **Rewards**: gold (spent at the peddler) and embers (kept forever) per fight; then choose 1 of 3–5:
   a new ability, an upgrade (+1/+2), or training a hero (+15% power, +10% hp for the run).
+- **Chests and trinkets** (items.js, chest.js): elites drop a chest with 1 trinket, bosses a gold chest with 2
+  (the second at least rare). Rarities common → uncommon → rare → epic → legendary → mythic. Trinkets go to the
+  Storehouse at camp; each hero wears one (Storehouse or tap a hero). Spares melt into embers. When the
+  Storehouse is full, the weakest spare is melted to make room for a rarer find.
+  **Balance rule:** a trinket is always weaker than one Forge tier (+15% hp and power). Stat budget 4/6/8/10/11/12%
+  (two stats from rare up, each ~58% of the budget; guard counts 0.8x). Legendary adds a small effect (start
+  shield, regen, thorns, leech, +1 spark, first-hit crit); mythics are unique (Phoenix Plume, Echo Bell,
+  Sparkheart). Effects live in battle.js (`u.gear`).
+- **Camera**: in the dungeon the camera orbits and zooms like at camp (tilt capped so you can't look under the
+  floor); the eye button in the top bar re-frames the arena.
+- **Go home**: the map's "Go home" ends a delve early (embers and trinkets are kept).
 - **Biomes**: Mossy Hollow, then Crystal Grotto unlocks after the first boss (tier 1 = +3 enemy levels).
   Beating bosses also raises later delve levels a little (`encounterFor`).
 
@@ -73,6 +86,8 @@ existing game. Every visual is procedural voxels (no downloaded assets, fonts, s
 | heroes.js | 6 hero builders, `HEROES` stats/roles, `STARTERS`, `RECRUITS` |
 | enemies.js | 11 enemies over 2 biomes (incl. 2 elites + 2 bosses), `ENEMIES`, `BIOMES` |
 | data.js | Seeded helpers, `ABILITIES`, `RELICS`, `makeMap`, `encounterFor`, `enemyStats`, `EVENTS` |
+| items.js | Trinket rarities, stats, effects, mythics, chest drop odds (`chestLoot`), Storehouse sizes |
+| chest.js | Voxel loot chest on the character rig with its own animator (`spec.animate`) |
 | arena.js | `Arena`: builds each room as a floating rock chunk at y = −140 (floor, back wall, edge decor, braziers, campfire/stall/shrine) |
 | fx.js | `BattleFX`: projectiles, bursts, rings, bolts, shield bubbles, ice, floating numbers, screen shake |
 | base.js | `Base`: the camp island, building sites, building drop-in, camp heroes |
@@ -95,6 +110,11 @@ existing game. Every visual is procedural voxels (no downloaded assets, fonts, s
   so enemy hp/atk were raised a bit afterwards: `enemyStats`).
 - Note: when the browser pane is hidden, animation frames are throttled; travel uses game-time waits
   (`after()` in main.js) so nothing gets stuck, but floors assemble slowly in that state.
+
+- 2026-11-05: chests (elite + boss, in the real flow), Storehouse sheet, giving and melting trinkets, hero
+  sheet slot, a full Storehouse, dungeon orbit/zoom + reset, Go home, resuming an event at its outcome, phone
+  width for the reward and Storehouse sheets. Mythic effects checked in a boss fight without errors (Phoenix
+  revive seen); their exact numbers are not tuned by play yet.
 
 ## Ideas / next steps
 - Portrait phones: a vertical battle layout (heroes bottom, enemies top) would let characters be bigger.

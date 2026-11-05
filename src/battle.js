@@ -91,6 +91,7 @@ export class Battle {
         spd: h.spd,
         melee: def.role === 'front',
         home: homes[h.id],
+        gear: h.gear || {}, // trinket: { crit, guard, effect }
       });
       u.alive = h.hp > 0;
       u.char.ko = !u.alive;
@@ -100,6 +101,11 @@ export class Battle {
     for (const u of this.units) u.timer = 0.6 + Math.random() * u.spd * 0.8 + (u.side === 'enemy' ? 0.9 : 0);
     if (mods.enemyBurn) for (const u of this.enemies()) u.burn = { dps: 4 + level, t: 6 };
     this.boss = this.units.find((u) => u.side === 'enemy' && (u.def.boss || u.def.elite)) || null;
+    // trinket effects that act at the start
+    for (const u of this.heroes()) {
+      if (u.gear.effect === 'spark') this.sparks = Math.min(MAX_SPARKS, this.sparks + 1);
+      if (u.gear.effect === 'shield') u.shieldIn = 0.9; // a moment after the fight starts (see update)
+    }
   }
 
   addUnit(o) {
@@ -207,7 +213,8 @@ export class Battle {
   }
 
   crit(u) {
-    const base = 0.08 + (this.mods.critBonus || 0) + (u.id === 'duskblade' ? 0.22 : 0);
+    if (u.gear?.effect === 'firstcrit' && !u.openedWithCrit) return (u.openedWithCrit = true);
+    const base = 0.08 + (this.mods.critBonus || 0) + (u.id === 'duskblade' ? 0.22 : 0) + (u.gear?.crit || 0);
     return Math.random() < base;
   }
 
@@ -227,6 +234,7 @@ export class Battle {
     if (!target?.alive) return 0;
     if (src?.side === 'hero' && (target.def?.boss || target.def?.elite)) amount *= this.mods.bossMul || 1;
     if (crit) amount *= 1.7;
+    if (target.side === 'hero' && target.gear?.guard) amount *= 1 - target.gear.guard;
     let amt = Math.max(1, Math.round(amount * (0.92 + Math.random() * 0.16)));
     const pos = this.chest(target, 0.75);
     if (target.shield > 0) {
@@ -253,6 +261,15 @@ export class Battle {
     if (melee && src?.alive) {
       if (target.def?.trait === 'thorns' && src.side === 'hero') this.damage(target, src, amt * 0.15, { quiet: true, color: '#e8e0cc' });
       if (target.side === 'hero' && this.mods.thorns && src.side === 'enemy') this.damage(target, src, amt * this.mods.thorns, { quiet: true, color: '#9fe3ff' });
+      if (target.gear?.effect === 'thorns' && src.side === 'enemy' && src.alive) this.damage(target, src, amt * 0.15, { quiet: true, color: '#8fd16a' });
+    }
+    if (src?.side === 'hero' && src.alive) {
+      if (src.gear?.effect === 'leech') this.heal(src, amt * 0.06, true);
+      if (crit && src.gear?.effect === 'sparkheart' && this.time - (src.sparkT ?? -9) > 3) {
+        src.sparkT = this.time;
+        this.sparks = Math.min(MAX_SPARKS, this.sparks + 1);
+        this.fx.text(this.chest(src, 1.05), '+1 spark', 'info');
+      }
     }
     if (src?.def?.trait === 'lifesteal' && src.alive) this.heal(src, amt * 0.5, true);
     if (target.def?.trait === 'summon') this.checkSummon(target);
@@ -285,6 +302,18 @@ export class Battle {
   }
 
   kill(u, src) {
+    if (u.side === 'hero' && u.gear?.effect === 'phoenix' && !u.rose && !this.over) {
+      // Phoenix Plume: once per battle, back up in a puff of embers
+      u.rose = true;
+      u.hp = Math.round(u.maxHp * 0.25);
+      u.poison = u.burn = null;
+      this.fx.burst(this.chest(u, 0.5), '#ff8a3c', 18, { speed: 3, up: 4, life: 0.7, size: 0.2 });
+      this.fx.ring(u.char.pos, '#ffb347', 1.6);
+      this.fx.text(this.chest(u, 1.1), 'Rise!', 'heal');
+      sfx.healSound(true);
+      u.char.play('cheer', { dur: 0.8 });
+      return;
+    }
     u.alive = false;
     u.hp = 0;
     u.move = null;
@@ -757,6 +786,17 @@ export class Battle {
         if (!u.alive) break;
       }
       if (!u.alive) continue;
+      if (u.shieldIn != null && !this.over && (u.shieldIn -= dt) <= 0) {
+        u.shieldIn = null;
+        this.shield(u, u.maxHp * 0.12);
+      }
+      if (u.gear?.effect === 'regen' && !this.over) {
+        u.regenT = (u.regenT || 0) + dt;
+        if (u.regenT >= 2) {
+          u.regenT = 0;
+          if (u.hp < u.maxHp) this.heal(u, u.maxHp * 0.015, true);
+        }
+      }
       u.char.tint = u.stun > 0 && this.fx.ices.has(u) ? TINT.ice : u.poison ? TINT.poison : u.burn ? TINT.burn : null;
 
       if (u.move) {
@@ -779,8 +819,13 @@ export class Battle {
       u.timer -= dt * haste;
       if (u.timer <= 0) {
         u.timer = u.spd * (0.9 + Math.random() * 0.2);
-        if (u.side === 'hero') this.heroAct(u);
-        else this.enemyAct(u);
+        if (u.side === 'hero') {
+          this.heroAct(u);
+          if (u.gear.effect === 'echo' && Math.random() < 0.12) {
+            u.timer = 0.3; // Echo Bell: act again right away
+            this.fx.text(this.chest(u, 1.05), 'Echo!', 'info');
+          }
+        } else this.enemyAct(u);
       }
     }
     // tidy away enemies that have finished shattering
