@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#5fb8ff" />
+    <meta name="description" content="A cozy voxel idle auto-battler: a little camp on a floating island, and a different dungeon every time you delve." />
+    <title>Emberdelve</title>
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <script type="module" crossorigin src="./assets/index-BBPXz0zh.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Twlsw6Ii.css">
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div id="overlay" class="overlay"></div>
+    <div id="bars" class="overlay"></div>
+    <div id="tags" class="overlay tags" hidden></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 12 12" aria-hidden="true" shape-rendering="crispEdges">
+          <path d="M5 0h1v1h1v1h1v2h1v4h-1v2h-1v1h-4v-1h-1v-2h-1v-3h1v-2h1v-1h1v-1h1z" fill="#ff8a3c" />
+          <path d="M5 5h2v1h1v3h-1v1h-3v-1h-1v-2h1v-1h1z" fill="#ffd36b" />
+        </svg>
+        <span>Emberdelve</span>
+      </div>
+      <div class="pills">
+        <span class="pill gold" id="gold-pill" hidden title="Gold (this delve)"><svg class="ico" viewBox="0 0 24 24"><g transform="scale(2)" shape-rendering="crispEdges"><path d="M3 1h6v1h1v1h1v6h-1v1h-1v1h-6v-1h-1v-1h-1v-6h1v-1h1z" fill="#ffcf45"/><path d="M4 3h1v5h-1z" fill="#fff" fill-opacity=".55"/></g></svg><b id="gold">0</b></span>
+        <span class="pill ember" id="ember-pill" title="Embers (kept between delves)"><svg class="ico" viewBox="0 0 24 24"><g transform="scale(2)" shape-rendering="crispEdges"><path d="M5 0h1v1h1v1h1v2h1v4h-1v2h-1v1h-4v-1h-1v-2h-1v-3h1v-2h1v-1h1v-1h1z" fill="#ff8a3c"/><path d="M5 5h2v1h1v3h-1v1h-3v-1h-1v-2h1v-1h1z" fill="#ffd36b"/></g></svg><b id="embers">0</b></span>
+        <button class="round" id="view-btn" aria-label="Reset the camera" title="Reset the camera" hidden><svg class="ico" viewBox="0 0 24 24"><g transform="scale(2)" shape-rendering="crispEdges"><path d="M4 2h4v1h2v1h1v1h1v2h-1v1h-1v1h-2v1h-4v-1h-2v-1h-1v-1h-1v-2h1v-1h1v-1h2z M5 4v1h-1v2h1v1h2v-1h1v-2h-1v-1z" fill="currentColor" fill-rule="evenodd"/><path d="M5 5h2v2h-2z" fill="currentColor"/></g></svg></button>
+        <button class="round" id="book-btn" aria-label="Journal" title="Journal"><svg class="ico" viewBox="0 0 24 24"><g transform="scale(2)" shape-rendering="crispEdges"><path d="M1 1h4v1h1v1h-1v-1h-4zM7 1h4v1h-4zM1 2h4v7h-4zM7 2h4v7h-4zM6 3h1v6h-1zM1 9h10v1h-10z" fill="currentColor"/></g></svg></button>
+        <button class="round" id="sound-btn" aria-label="Sound on or off"><svg class="ico" viewBox="0 0 24 24"><g transform="scale(2)" shape-rendering="crispEdges"><path d="M1 4h2v-1h1v-1h1v-1h1v10h-1v-1h-1v-1h-1v-1h-2z" fill="currentColor"/><path class="wave" d="M8 3h1v1h1v4h-1v1h-1v-1h1v-4h-1z" fill="currentColor"/></g></svg></button>
+        <button class="round" id="settings-btn" aria-label="Settings"><svg class="ico" viewBox="0 0 24 24"><g transform="scale(2)" shape-rendering="crispEdges"><path d="M5 0h2v1h1v1h2v2h1v4h-1v2h-2v1h-1v1h-2v-1h-1v-1h-2v-2h-1v-4h1v-2h2v-1h1z M5 4v4h2v-4z" fill="currentColor" fill-rule="evenodd"/></g></svg></button>
+      </div>
+    </header>
+
+    <div class="toast" id="toast"></div>
+
+    <div class="boss-bar" id="boss-bar" hidden>
+      <span class="boss-name"></span>
+      <div class="boss-track"><i class="boss-shield"></i><i class="boss-fill"></i></div>
+    </div>
+
+    <!-- camp -->
+    <section class="panel camp-panel" id="camp-panel">
+      <div class="party-strip" id="party-strip"></div>
+      <p class="camp-note" id="camp-note"></p>
+      <div class="panel-actions">
+        <button class="btn btn-soft" id="camp-btn">Camp</button>
+        <button class="btn btn-go" id="delve-btn">Delve</button>
+      </div>
+    </section>
+
+    <!-- battle -->
+    <section class="panel battle-panel" id="battle-panel" hidden>
+      <div class="spark-row">
+        <span class="spark-label"><b id="spark-count">0</b> sparks</span>
+        <div class="spark-meter" id="spark-meter"></div>
+        <button class="mini-chip" id="speed-btn">1x</button>
+        <button class="mini-chip" id="auto-btn" title="Let the party cast abilities on their own">Auto</button>
+      </div>
+      <div class="cards" id="cards"></div>
+    </section>
+
+    <!-- map -->
+    <section class="map" id="map" hidden>
+      <div class="map-card">
+        <header class="map-head">
+          <div>
+            <h2 id="map-biome"></h2>
+            <small id="map-depth"></small>
+          </div>
+          <div class="map-btns">
+            <button class="mini-chip" id="map-home" title="End the delve and walk home (embers are kept)">Go home</button>
+            <button class="mini-chip" id="map-peek">Look around</button>
+          </div>
+        </header>
+        <div class="map-party" id="map-party"></div>
+        <div class="map-relics" id="map-relics"></div>
+        <div class="map-svg-box" id="map-svg-box"></div>
+        <div class="map-legend" id="map-legend"></div>
+      </div>
+    </section>
+
+    <!-- one reusable dialog -->
+    <div class="sheet-wrap" id="sheet" hidden>
+      <div class="sheet">
+        <header class="sheet-head">
+          <h2 id="sheet-title"></h2>
+          <button class="round" id="sheet-close" aria-label="Close">&times;</button>
+        </header>
+        <p class="sheet-note" id="sheet-note"></p>
+        <div class="sheet-body" id="sheet-body"></div>
+      </div>
+    </div>
+
+    <div class="fade" id="fade"></div>
+  </body>
+</html>

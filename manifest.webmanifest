@@ -1,0 +1,10 @@
+{
+  "name": "Emberdelve",
+  "short_name": "Emberdelve",
+  "description": "A cozy voxel idle auto-battler with a different dungeon every delve.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#9fd6ff",
+  "theme_color": "#5fb8ff",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
