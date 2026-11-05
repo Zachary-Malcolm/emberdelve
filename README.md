@@ -5,6 +5,8 @@ then send your party down the Delve Gate: every delve is a new seeded dungeon wi
 that play themselves while you fire ability cards, events, a peddler, campfires and a boss at the bottom.
 The embers you bring home build and upgrade the camp.
 
+**Play it:** https://zachary-malcolm.github.io/emberdelve/ (works on phones; add it to your home screen to play offline)
+
 - Every model is made procedurally from voxels: heroes and monsters are part-rigged voxel characters with idle,
   attack, hurt, knock-out and shatter animations. No downloaded art, fonts or sounds.
 - Music and sound effects are generated live with Tone.js.

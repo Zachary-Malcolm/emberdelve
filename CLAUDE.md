@@ -17,7 +17,11 @@ existing game. Every visual is procedural voxels (no downloaded assets, fonts, s
   `vd.unlockAll()` opens every biome, `vd.xp(100)` gives the roster experience).
 - Save: localStorage key `vdelve.save.v1` (`src/save.js`). The current delve is saved too, so a reload resumes
   it (pending reward/shop/event, or the end-of-run sheet via `run.over`).
-- GitHub: https://github.com/Zachary-Malcolm/emberdelve (**private**, branch `master`). Ask Zach before making it public or turning on GitHub Pages.
+- GitHub: https://github.com/Zachary-Malcolm/emberdelve (**public** since 2026-11-05, at Zach's request; source on
+  `master`). Playable at **https://zachary-malcolm.github.io/emberdelve/** (GitHub Pages from the `gh-pages` branch,
+  which holds only the built `dist/`). To deploy a new build: `npm run build`, copy `dist/` into an empty temp
+  folder, add an empty `.nojekyll`, `git init -b gh-pages`, commit, and force-push it to the `gh-pages` branch.
+  Only deploy when Zach asks.
 
 ## Rules from Zach
 - Original design only, never a copy of an existing game's look, characters, names or levels. Genre mechanics are fine.
