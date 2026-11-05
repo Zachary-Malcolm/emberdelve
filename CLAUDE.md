@@ -15,7 +15,7 @@ existing game. Every visual is procedural voxels (no downloaded assets, fonts, s
   `vd.win()`, `vd.lose()`, `vd.reset()`).
 - Save: localStorage key `vdelve.save.v1` (`src/save.js`). The current delve is saved too, so a reload resumes
   it (pending reward/shop/event, or the end-of-run sheet via `run.over`).
-- Not on GitHub yet: ask Zach before creating a repo or pushing anything public.
+- GitHub: https://github.com/Zachary-Malcolm/emberdelve (**private**, branch `master`). Ask Zach before making it public or turning on GitHub Pages.
 
 ## Rules from Zach
 - Original design only, never a copy of an existing game's look, characters, names or levels. Genre mechanics are fine.
